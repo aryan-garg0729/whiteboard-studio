@@ -41,6 +41,13 @@ STYLES = {
         "tool": {"type": "pen", "inkWidth": 4.5},
         "tip_hint": "top",
     },
+    "hand3": {
+        "label": "Right hand, marker",
+        "handedness": "right",
+        # A chisel-tip marker rather than a ballpoint, so it lays a wider line.
+        "tool": {"type": "pen", "inkWidth": 4.5},
+        "tip_hint": "top",
+    },
     "hand4": {
         "label": "Floating pen (no hand)",
         "handedness": "right",

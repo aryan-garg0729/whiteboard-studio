@@ -17,7 +17,7 @@ import { dirname, isAbsolute, resolve } from 'node:path';
 import opentype from 'opentype.js';
 
 import { parseSvg } from '../src/engine/compile/svgDoc.js';
-import { layoutText } from '../src/engine/compile/text.js';
+import { layoutText, outlineText } from '../src/engine/compile/text.js';
 import { styleIdsFor } from '../src/engine/hand/styles.js';
 
 const arr = (a) => (Array.isArray(a) ? a : Array.from(a));
@@ -94,26 +94,50 @@ export async function prepareProject(project, projectPath, sidecar) {
         throw new Error(`${fontPath.split('/').pop()} could not be read `
           + `(${err.message}). Choose a different font.`);
       }
-      const layout = await layoutText(font, asset.text, {
+      const opts = {
         fontSize: asset.fontSize ?? 120,
         penWidth: asset.penWidth ?? Math.max(2, (asset.fontSize ?? 120) * 0.045),
         color: asset.color,
-        getSkeleton: (commands, key) => sidecar.skeletonizeGlyph(commands, {
-          key, unitsPerEm: font.unitsPerEm, size: 256, supersample: 2,
-        }),
-      });
-      prepared[clip.id] = {
-        kind: 'text',
-        bbox: arr(layout.bbox),
-        width: layout.width,
-        height: layout.height,
-        monoline: layout.monoline,
-        // Strokes are re-derived in the renderer; only the raw polylines and
-        // their brush settings need to cross the boundary.
-        strokes: layout.strokes.map((s) => ({
-          pts: arr(s.pts), width: s.width, color: s.color, lift: s.lift,
-        })),
       };
+
+      // The two text animations want completely different geometry, so the
+      // branch is on the clip's animation rather than on the asset kind. The
+      // reveal keeps the filled letterform and therefore never needs a
+      // centreline -- which means no sidecar round trip, and adding text is
+      // instant instead of one rasterise-and-skeletonise per distinct glyph.
+      if (clip.animId === 'draw.textReveal') {
+        const layout = outlineText(font, asset.text, opts);
+        prepared[clip.id] = {
+          kind: 'text',
+          mode: 'reveal',
+          bbox: arr(layout.bbox),
+          inkBbox: arr(layout.inkBbox),
+          width: layout.width,
+          height: layout.height,
+          penWidth: opts.penWidth,
+          lines: layout.lines,
+          regions: layout.regions.map((r) => ({ rings: r.rings.map(arr), color: r.color })),
+        };
+      } else {
+        const layout = await layoutText(font, asset.text, {
+          ...opts,
+          getSkeleton: (commands, key) => sidecar.skeletonizeGlyph(commands, {
+            key, unitsPerEm: font.unitsPerEm, size: 256, supersample: 2,
+          }),
+        });
+        prepared[clip.id] = {
+          kind: 'text',
+          bbox: arr(layout.bbox),
+          width: layout.width,
+          height: layout.height,
+          monoline: layout.monoline,
+          // Strokes are re-derived in the renderer; only the raw polylines and
+          // their brush settings need to cross the boundary.
+          strokes: layout.strokes.map((s) => ({
+            pts: arr(s.pts), width: s.width, color: s.color, lift: s.lift,
+          })),
+        };
+      }
     }
   }
   return prepared;

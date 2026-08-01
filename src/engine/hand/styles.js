@@ -8,7 +8,7 @@
  */
 
 /** Drawing hands: offered in the picker, one chosen per project. */
-export const HAND_STYLE_IDS = ['hand1', 'hand2', 'hand4'];
+export const HAND_STYLE_IDS = ['hand1', 'hand2', 'hand3', 'hand4'];
 
 /**
  * Tool styles loaded *alongside* whichever hand is chosen.

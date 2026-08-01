@@ -64,33 +64,58 @@ export function assetTilt(style, source) {
  *
  * With the nib at P and the elbow at Q = P + s*R(theta)*V, "not detached"
  * means Q lies outside the frame. The distance from P to the boundary along a
- * unit direction u is a ray/AABB exit; the worst case is u as far off the
- * anchor-edge normal as it can get, with P on the opposite edge, giving
- * H / cos(worst). Hence:
+ * unit direction u is a ray/AABB exit, and the largest it can ever be is the
+ * span of the frame along u -- reached from the corner upstream of u:
  *
- *     s_min = (H + margin) / (|V| * cos(theta_max + |assetTilt|))
+ *     span(u) = min(W / |ux|, H / |uy|)
+ *     s_min   = (max over |theta| <= theta_max of span(R(theta) * V/|V|) + margin) / |V|
  *
- * The `assetTilt` term matters and is easy to miss: the applied rotation is
- * clamped to +/-theta_max, but it compounds with the asset's own lean. For
- * hand1 that lean is 2.4deg, so the true worst case is 27.4deg rather than
- * 25deg -- and omitting it leaves the arm ~22px short of the edge with the nib
- * at the top of the frame, which is visible as a floating detached hand in
- * exactly the situation the constraint exists to prevent.
+ * This is the same geometry `elbowOutside` verifies against, which is the point:
+ * the two used to disagree. The previous closed form assumed the limb exits the
+ * anchor edge along its normal and used the frame *height* whichever edge that
+ * was, so it was only correct for a top/bottom anchor. A hand whose forearm
+ * leaves through the left edge -- hand3's does, at 64deg off that edge's normal
+ * -- drove cos(theta_max + assetTilt) towards zero and demanded a scale of ~34,
+ * a sprite twenty times wider than the frame. Sweeping the rotation clamp and
+ * taking the true span removes both the special case and the blow-up.
  *
- * For hand1 at 1080p (|V| = 1921.7, margin = 24) this gives ~0.647 -- a 422px
- * hand on a 1920px frame, about 22% of frame width, where reference products sit.
- *
- * This is still meaningfully tighter than the naive "render the sprite at least
- * as tall as the frame", which ignores the rotation clamp entirely and
- * overestimates the required scale by roughly 55%.
+ * For hand1 at 1080p on a 1920x1080 frame (|V| = 1921.7, margin = 24) this gives
+ * ~0.645, within a thousandth of the old closed form -- for a near-vertical limb
+ * H/|uy| dominates and the two agree, as they should.
  */
-export function minScale(style, source, frameH, margin = EDGE_MARGIN) {
+export function minScale(style, source, frame, margin = EDGE_MARGIN) {
   if (style.constraint === 'none' || !source.armLenPx) return 1;
-  const worst = (style.maxRotationDeg ?? 25) * DEG + Math.abs(assetTilt(style, source));
-  // Beyond 90deg off the normal the limb never reaches the edge at any scale.
-  const c = Math.cos(Math.min(worst, 1.5533)); // cap at 89deg
-  return (frameH + margin) / (source.armLenPx * c);
+  // Callers used to pass just the height. Keep that working, but treat the
+  // frame as square in that case -- the honest answer needs both dimensions.
+  const f = typeof frame === 'number' ? { w: frame, h: frame } : frame;
+
+  const vx = source.armExitPx[0] - source.tipPx[0];
+  const vy = source.armExitPx[1] - source.tipPx[1];
+  const len = Math.hypot(vx, vy) || 1;
+
+  // Worst case over the rotation clamp. The limb's own lean is already in V, so
+  // there is no separate assetTilt term to add -- it is the rotation that gets
+  // swept, and the two compound automatically.
+  const maxR = (style.maxRotationDeg ?? 25) * DEG;
+  let need = 0;
+  for (let i = -STEPS; i <= STEPS; i++) {
+    const a = (maxR * i) / STEPS;
+    const c = Math.cos(a);
+    const s = Math.sin(a);
+    const ux = (vx * c - vy * s) / len;
+    const uy = (vx * s + vy * c) / len;
+    // The farthest the nib can ever be from the boundary along u is the span of
+    // the frame along u, reached from the corner upstream of it. A zero
+    // component means that axis is never crossed, hence Infinity.
+    const tx = Math.abs(ux) > 1e-12 ? f.w / Math.abs(ux) : Infinity;
+    const ty = Math.abs(uy) > 1e-12 ? f.h / Math.abs(uy) : Infinity;
+    need = Math.max(need, Math.min(tx, ty));
+  }
+  return (need + margin) / source.armLenPx;
 }
+
+/** Rotation samples per side when searching the clamp for the worst case. */
+const STEPS = 8;
 
 /**
  * Distance from P to the frame boundary along unit direction u.
@@ -112,11 +137,11 @@ export function exitDistance(px, py, ux, uy, w, h) {
  * resolution *and* synthetic geometry, when a bigger source would have needed
  * neither. Stretching is the fallback for portrait output, not the default.
  */
-export function pickSource(style, frameH) {
+export function pickSource(style, frame) {
   let best = style.sources[0];
   let bestCost = Infinity;
   for (const s of style.sources) {
-    const k = minScale(style, s, frameH);
+    const k = minScale(style, s, frame);
     // Within comfort: prefer the largest usable scale (least downscaling).
     // Beyond it: rank after every comfortable option, by how far past it goes.
     const cost = k <= COMFORT_SCALE
@@ -175,7 +200,7 @@ export function rotationFor(style, tangent) {
  *            tipPx:[number,number], stretchPx:number, detached:boolean}}
  */
 export function solveHand(style, tip, tangent, frame) {
-  const source = pickSource(style, frame.h);
+  const source = pickSource(style, frame);
   const rotation = rotationFor(style, tangent);
 
   if (style.constraint === 'none') {
@@ -188,7 +213,7 @@ export function solveHand(style, tip, tangent, frame) {
     };
   }
 
-  const required = minScale(style, source, frame.h);
+  const required = minScale(style, source, frame);
   const scale = Math.min(required, COMFORT_SCALE);
 
   // When the comfortable scale is too small to reach the edge, make up the

@@ -21,13 +21,22 @@ import { easeEnds, strokePartial, strokeWhole } from './outlineFill.js';
 /** Eraser head is much wider than a pen nib. */
 export const ERASER_WIDTH_FACTOR = 6;
 
-/** True when the plan lays no ink at all, so there is nothing to erase. */
+/**
+ * True when the plan lays no ink at all, so there is nothing to erase.
+ *
+ * `inkBbox` comes first because not every animation draws strokes. The text
+ * reveal lays its ink as a mask over the glyph artwork and has no strokes at
+ * all, so a stroke scan would conclude there is nothing there and silently
+ * refuse to erase the very clips most obviously covered in ink.
+ */
 export function hasInk(plan) {
+  if (plan.inkBbox) return plan.inkBbox[2] > plan.inkBbox[0] && plan.inkBbox[3] > plan.inkBbox[1];
   return plan.strokes.some((st) => !st.lift && st.pts.length >= 4);
 }
 
 /** Union of the bounding boxes of the strokes that actually lay ink. */
 export function inkExtent(plan) {
+  if (plan.inkBbox) return plan.inkBbox;
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
   for (const st of plan.strokes) {
     if (st.lift) continue;
@@ -50,6 +59,7 @@ export function inkExtent(plan) {
  */
 export function compileErase(plan, params = {}) {
   const penWidth = params.penWidth
+    ?? plan.penWidth
     ?? (plan.strokes.find((s) => !s.lift)?.width ?? 3);
   const width = params.eraserWidth ?? penWidth * ERASER_WIDTH_FACTOR;
 

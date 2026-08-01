@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "id": "hand3",
+  "label": "Right hand, marker",
+  "handedness": "right",
+  "tool": {
+    "type": "pen",
+    "inkWidth": 4.5
+  },
+  "anchorEdge": "left",
+  "constraint": "edge",
+  "naturalAngleDeg": 68.8,
+  "alignFactor": 0.16,
+  "maxRotationDeg": 25,
+  "stretchBand": null,
+  "sources": [
+    {
+      "w": 1120,
+      "h": 2000,
+      "file": "hands/hand3-1080p.png",
+      "tipPx": [
+        801.5,
+        21.0
+      ],
+      "opaqueBBox": [
+        0,
+        21,
+        1087,
+        1996
+      ],
+      "armExitPx": [
+        0.0,
+        1698.0
+      ],
+      "armLenPx": 1858.7
+    }
+  ]
+}

@@ -667,7 +667,7 @@ export default function Timeline({
                           cls={asset.kind || 'image'}
                           left={c.start * pxPerSec}
                           width={c.duration * pxPerSec}
-                          label={c.animId === 'draw.handwrite' ? 'Write' : 'Draw'}
+                          label={asset.kind === 'text' ? 'Write' : 'Draw'}
                           title={clipTitle(c, asset)}
                           selected={sel}
                           resizable

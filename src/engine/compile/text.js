@@ -12,6 +12,7 @@
  */
 
 import { makeStroke } from './geometry.js';
+import { flattenPath } from './svgPath.js';
 
 /** Stable cache key for a glyph outline at given options. */
 export function glyphKey(commands, upem, opts = {}) {
@@ -133,9 +134,18 @@ export function orderGlyphStrokes(strokes) {
  * @param {number} [o.penWidth]
  * @param {number} [o.letterGap] pen-lift travel threshold, object units
  */
-export async function layoutText(font, text, o) {
-  const upem = font.unitsPerEm;
-  const scale = o.fontSize / upem;
+/**
+ * Lay the string out: which glyph goes where, in font units.
+ *
+ * Shared by both text animations, because typography is typography however the
+ * letters are later revealed. Everything after this point differs -- one path
+ * asks the sidecar for centrelines, the other keeps the filled outline.
+ *
+ * @returns {{placements:{glyph:Object, penX:number, lineIndex:number}[],
+ *            scale:number, lineHeight:number, maxWidth:number, lineCount:number}}
+ */
+export function placeGlyphs(font, text, o) {
+  const scale = o.fontSize / font.unitsPerEm;
   const lineHeight = o.lineHeight ?? o.fontSize * 1.35;
 
   const lines = String(text).split('\n');
@@ -160,6 +170,17 @@ export async function layoutText(font, text, o) {
     });
     maxWidth = Math.max(maxWidth, penX);
   });
+
+  return { placements, scale, lineHeight, maxWidth, lineCount: lines.length };
+}
+
+/** The drawable's bounds, padded for a pen that overshoots its centreline. */
+const textBbox = (fontSize, w, h) =>
+  [-fontSize * 0.3, -fontSize * 1.1, w + fontSize * 0.3, h + fontSize * 0.4];
+
+export async function layoutText(font, text, o) {
+  const upem = font.unitsPerEm;
+  const { placements, scale, lineHeight, maxWidth, lineCount } = placeGlyphs(font, text, o);
 
   // One sidecar request per distinct glyph outline, not per occurrence.
   const unique = new Map();
@@ -209,10 +230,10 @@ export async function layoutText(font, text, o) {
   }
 
   const w = maxWidth * scale;
-  const h = lines.length * lineHeight;
+  const h = lineCount * lineHeight;
   return {
     strokes,
-    bbox: [-o.fontSize * 0.3, -o.fontSize * 1.1, w + o.fontSize * 0.3, h + o.fontSize * 0.4],
+    bbox: textBbox(o.fontSize, w, h),
     width: w,
     height: h,
     // Aggregate across the string: a single glyph's modulation is noisy
@@ -220,6 +241,99 @@ export async function layoutText(font, text, o) {
     // over a font separates cleanly -- Sans ~0.09, Serif ~0.25.
     modulation: meanModulation([...skeletons.values()]),
     monoline: meanModulation([...skeletons.values()]) < 0.22,
+  };
+}
+
+/**
+ * Text -> filled letterforms, plus the geometry a left-to-right reveal needs.
+ *
+ * The counterpart to `layoutText`. That one throws the outline away and keeps a
+ * skeleton traced down the middle of each letter, which only reads correctly on
+ * near-monoline faces. This keeps the outline itself, so the letters *are* the
+ * font -- and, because no centreline is needed, it never touches the sidecar and
+ * is therefore synchronous and instant.
+ *
+ * @returns {{regions:Array, lines:Array, bbox:number[], width:number,
+ *            height:number, inkBbox:number[]}}
+ */
+export function outlineText(font, text, o) {
+  const { placements, scale, lineHeight, maxWidth, lineCount } = placeGlyphs(font, text, o);
+  const color = o.color ?? '#1a1a1a';
+  // Flattening tolerance in object units. Tied to the size the text is drawn at
+  // rather than fixed, or a 400px headline goes visibly faceted.
+  const eps = Math.max(0.05, o.fontSize * 0.0025);
+
+  const regions = [];
+  /** Per line: the ink band, and the runs of consecutive inked glyphs in it. */
+  const lines = Array.from({ length: lineCount }, () => ({
+    y0: Infinity, y1: -Infinity, spans: [], broke: true,
+  }));
+
+  for (const p of placements) {
+    const line = lines[p.lineIndex];
+    // A space has an advance but no contours. That is how a word break is
+    // detected here -- the character itself is long gone by this point, and
+    // guessing from the gap width instead needs a threshold that separates a
+    // space from a letter's sidebearings, which no single number does across
+    // fonts and sizes.
+    if (!p.glyph.path.commands.length) { line.broke = true; continue; }
+
+    // opentype positions and scales the outline for us, and emits y-down --
+    // exactly the mapping layoutText applies by hand to its centrelines, so the
+    // two agree and a clip can be switched between animations without moving.
+    const path = p.glyph.getPath(p.penX * scale, p.lineIndex * lineHeight, o.fontSize);
+    const rings = flattenPath(path.toPathData(3), { eps })
+      .map((s) => s.pts)
+      .filter((pts) => pts.length >= 6);
+    if (!rings.length) continue;
+
+    let x0 = Infinity; let x1 = -Infinity;
+    for (const pts of rings) {
+      for (let i = 0; i < pts.length; i += 2) {
+        if (pts[i] < x0) x0 = pts[i];
+        if (pts[i] > x1) x1 = pts[i];
+        if (pts[i + 1] < line.y0) line.y0 = pts[i + 1];
+        if (pts[i + 1] > line.y1) line.y1 = pts[i + 1];
+      }
+    }
+
+    // A span is a *word*, not a letter: the reveal must not stop and restart
+    // between the letters of a word, only across the gaps where the pen lifts.
+    const last = line.spans[line.spans.length - 1];
+    if (last && !line.broke) last[1] = Math.max(last[1], x1);
+    else line.spans.push([x0, x1]);
+    line.broke = false;
+
+    regions.push({ rings, color });
+  }
+
+  const w = maxWidth * scale;
+  const h = lineCount * lineHeight;
+
+  // A line with no ink at all (a blank line in the middle of a paragraph) still
+  // holds a slot in the layout, but has no band and nothing to reveal.
+  for (const line of lines) {
+    if (!Number.isFinite(line.y0)) { line.y0 = 0; line.y1 = 0; }
+  }
+
+  const inked = lines.filter((l) => l.spans.length);
+  const inkBbox = inked.length
+    ? [
+      Math.min(...inked.map((l) => l.spans[0][0])),
+      Math.min(...inked.map((l) => l.y0)),
+      Math.max(...inked.map((l) => l.spans[l.spans.length - 1][1])),
+      Math.max(...inked.map((l) => l.y1)),
+    ]
+    : [0, 0, 0, 0];
+
+  return {
+    regions,
+    // `broke` is loop bookkeeping, not part of the shape the hosts serialise.
+    lines: lines.map(({ y0, y1, spans }) => ({ y0, y1, spans })),
+    bbox: textBbox(o.fontSize, w, h),
+    inkBbox,
+    width: w,
+    height: h,
   };
 }
 

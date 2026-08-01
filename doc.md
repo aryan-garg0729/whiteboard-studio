@@ -194,7 +194,8 @@ mode (`showHand: false`) draws no sprite at all.
 | True-colour reveal | Scribble mask ∩ artwork — reveals real pixels, not flat colour |
 | Hand rig | Placement, rotation clamp, edge constraint, portrait arm-stretch |
 | Raster vectorization | Line-art/photo classification, k-means in Lab, `RETR_CCOMP` even-odd rings; **thin clusters become centrelines, not contours** |
-| Text handwriting | opentype.js layout + skeletonized centrelines, role-based stroke order |
+| Text write (default) | `draw.textReveal` — real filled letterforms revealed left to right under an oscillating hand, word by word. `outlineText()` keeps the glyph outline opentype already has, so **text needs no sidecar at all** and is instant |
+| Text handwriting | `draw.handwrite` — opentype.js layout + skeletonized centrelines, role-based stroke order. Still selectable, and still what every pre-existing project uses |
 | SVG import | Shapes, groups, nested transforms, style/presentation attrs, fill→region, holes |
 | App shell | Electron + React; library, stage, inspector, timeline. Commands live in the **real application menu** (`buildMenu` in `electron/main.js`) and reach the renderer over `menu:command`; the in-app row keeps only the brand, the click-to-rename project title, undo/redo and Export |
 | Project name | `meta.name`, independent of the filename so it survives Save As; falls back to the filename, then "Untitled", and mirrors into the window title |
@@ -249,11 +250,17 @@ mode (`showHand: false`) draws no sprite at all.
   but the result is still weaker than for line art. An import-time tuning panel (colour
   count, min region area, smoothing) is the intended mitigation — `vectorize.py` already
   accepts all of these.
-- **Skeletonisation quality varies by font.** It extracts the medial axis of a *printed*
-  letterform. Near-monoline faces are excellent; modulated serifs read as traced type. The
-  sidecar returns a `modulation` figure and `monoline` flag — measured DejaVu Sans 0.07–0.21
-  vs DejaVu Serif 0.23–0.27 — and the scripts warn. Ship curated handwriting fonts as
-  defaults. A single-line/Hershey stroke-font fast path is the clean escape hatch.
+- **Skeletonisation quality varies by font — which is why it is no longer the default.**
+  It extracts the medial axis of a *printed* letterform. Near-monoline faces are excellent;
+  modulated serifs read as traced type. The sidecar returns a `modulation` figure and
+  `monoline` flag — measured DejaVu Sans 0.07–0.21 vs DejaVu Serif 0.23–0.27 — and the
+  scripts warn. This limitation is now scoped to `draw.handwrite`; `draw.textReveal` sidesteps
+  it entirely by drawing the outline rather than a stroke down the middle of it.
+- **The writing hand must not follow the sweep's tangent.** The oscillation is near-vertical
+  and reverses twice per letter, so the raw tangent slams between roughly ±78°, which the rig
+  scales into a ±12° rock about the nib — the hand visibly wags as it writes. `textReveal`
+  therefore returns a fixed `tangent: 0` and moves only in translation. This is the same trap
+  the serpentine scribble fill hit; a test pins the angle.
 - **Erase now shows the eraser hand.** `pickStyleForTool()` selects on the manifest's `tool`
   field, but it scans `session.hands` — so a tool style is only reachable if the host
   actually loaded it. All three hosts built that map from the chosen drawing hand alone,
@@ -266,6 +273,21 @@ mode (`showHand: false`) draws no sprite at all.
   tunable if you want strokes more legible.
 - **The hand is large** (22% of frame width). That is forced by the never-detached
   constraint and matches reference products. The only lever is the procedural arm stretch.
+- **`minScale` sweeps the rotation clamp; it is not a per-edge closed form.** It asks how far
+  the nib can ever be from the boundary along the limb's direction — `min(W/|ux|, H/|uy|)`,
+  the same geometry `elbowOutside` verifies against. The earlier form assumed the limb left
+  through its anchor edge along that edge's normal and used the frame *height* whichever edge
+  it was, so it was only right for a top/bottom anchor. hand3's forearm exits the **left**
+  edge at 64° off its normal, which drove `cos(θmax + assetTilt)` toward zero and demanded a
+  scale of ~34 — a sprite twenty times wider than the frame. For a near-vertical limb the two
+  agree to within 0.001, so hand1/hand2/eraser are unchanged.
+- **Judge hand size by the fist, not the manifest's `opaqueBBox`.** hand3's arm crosses the
+  asset diagonally, so its ink bbox is 52% of frame width while the fist renders at ~21% —
+  about the same as hand1. A bbox-fraction assertion would fail it for no real reason.
+- **`naturalAngleDeg` is measured but not applied.** `drawHand` multiplies it by `0`
+  (`render/drawHand.js`), so the sprite draws at its asset pose. The calibrator still records
+  it, and its shaft walk mismeasures hand3 as 68.8° — harmless while that `* 0` stands, but a
+  trap for anyone who re-enables it.
 - **The hand follows the pen's shaft angle, not its travel direction**, folded into
   (-90, 90]. With `alignFactor` 0.16 the sprite moves within about +/-14deg, well inside
   the +/-25deg the scale solve assumes. Turning either up brings back the frantic
@@ -274,8 +296,14 @@ mode (`showHand: false`) draws no sprite at all.
   region-contour path, where a double outline is not meaningful anyway. A thick elongated
   shape (a banner) stays filled by design -- see `STROKE_MAX_WIDTH_FRAC`.
 - **Settling needs an original to settle to.** Raster clips use their source pixels and
-  vectors are repainted from geometry, but **text does not settle** — there is no separate
-  original, the handwriting ink *is* the artwork. That is deliberate, not an omission.
+  vectors are repainted from geometry. **Handwritten text does not settle** — there is no
+  separate original, the traced ink *is* the artwork. Revealed text is the opposite case: it
+  is *only* artwork, masked, so it needs `sf.art` populated (`paintVectorArt` over the glyph
+  regions) in every host or it renders as nothing at all.
+- **Erase reads `plan.inkBbox` before `plan.strokes`.** A reveal plan has no strokes, so the
+  old stroke scan concluded there was nothing to erase and silently did nothing on a clip
+  plainly covered in ink. Any future animation that lays ink without strokes must carry
+  `inkBbox` too.
 - **On-canvas handles ignore `rotation`.** The selection box is the axis-aligned bounds of
   a rotated drawable, which is a correct if loose target; rotation is edited numerically in
   the inspector. Scaling is uniform because `transform` carries one `scale` and the

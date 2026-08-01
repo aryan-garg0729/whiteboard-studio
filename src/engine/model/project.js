@@ -25,7 +25,22 @@ export const DEFAULTS = {
 export const ASSET_KINDS = new Set(['image', 'vector', 'text']);
 
 /** Animation ids that ship today. Kept as data so the check stays honest. */
-export const KNOWN_ANIMATIONS = new Set(['draw.outlineFill', 'draw.handwrite']);
+export const KNOWN_ANIMATIONS = new Set([
+  'draw.outlineFill', 'draw.textReveal', 'draw.handwrite',
+]);
+
+/**
+ * Which animations suit which asset kind.
+ *
+ * The scribble fill needs traced regions and the text animations need a font,
+ * so the pairings are not interchangeable -- offering all of them everywhere
+ * just invites a clip that renders nothing.
+ */
+export const ANIMATIONS_FOR_KIND = {
+  image: ['draw.outlineFill'],
+  vector: ['draw.outlineFill'],
+  text: ['draw.textReveal', 'draw.handwrite'],
+};
 
 /** What a timeline track can hold. */
 export const TRACK_KINDS = new Set(['clip', 'audio']);

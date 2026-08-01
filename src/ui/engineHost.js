@@ -13,6 +13,7 @@ import { compileErase } from '../engine/anim/erase.js';
 import { paintVectorArt } from '../engine/render/vectorArt.js';
 import outlineFill from '../engine/anim/outlineFill.js';
 import handwrite from '../engine/anim/handwrite.js';
+import textReveal from '../engine/anim/textReveal.js';
 
 setSurfaceFactory((w, h) => {
   const canvas = new OffscreenCanvas(w, h);
@@ -54,7 +55,20 @@ export async function buildSession(loaded) {
     const p = prepared[clip.id];
     let plan;
 
-    if (p.kind === 'text') {
+    if (p.kind === 'text' && p.mode === 'reveal') {
+      plan = await textReveal.compile({
+        id: clip.id,
+        layout: {
+          lines: p.lines,
+          bbox: p.bbox,
+          inkBbox: p.inkBbox,
+          penWidth: p.penWidth,
+        },
+      });
+      // The reveal is a mask, so unlike handwriting it needs artwork underneath
+      // to reveal -- the filled letterforms.
+      artJobs.push({ clipId: clip.id, prepared: p });
+    } else if (p.kind === 'text') {
       const strokes = p.strokes.map((s) => makeStroke(f64(s.pts), {
         kind: s.lift ? 'TRAVEL' : 'OUTLINE',
         width: s.width, color: s.color, lift: s.lift,
@@ -94,7 +108,9 @@ export async function buildSession(loaded) {
     if (!sf) continue;
     const art = sf.ensureArt().ctx;
     if (p.art) art.drawImage(await loadImage(p.art), 0, 0, p.width, p.height);
-    else paintVectorArt(art, p.regions, p.subpaths);
+    // Glyph outlines are regions with no separate stroked subpaths. The
+    // 'evenodd' fill paintVectorArt already uses is what keeps counters open.
+    else paintVectorArt(art, p.regions, p.subpaths ?? []);
   }
 
   // Local-space bounds per clip, so the editor can draw selection boxes and

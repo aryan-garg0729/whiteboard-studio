@@ -1,9 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import opentype from 'opentype.js';
+import { createCanvas } from '@napi-rs/canvas';
 
 import {
   glyphKey, classifyStrokes, orientStroke, orderGlyphStrokes,
+  layoutText, outlineText,
 } from '../src/engine/compile/text.js';
+import { setSurfaceFactory, ClipSurfaces } from '../src/engine/render/surfaces.js';
+import { compileErase, hasInk } from '../src/engine/anim/erase.js';
+import textReveal, { buildSegments } from '../src/engine/anim/textReveal.js';
 
 const stroke = (pts, length) => ({ pts, length: length ?? pts.length * 10 });
 
@@ -87,4 +94,191 @@ test('closed rings start at the top and run clockwise in font units', () => {
   assert.ok(startY === 100, `ring should start at the top, started at y=${startY}`);
   // second point must move clockwise in y-up (i.e. +x along the top edge)
   assert.ok(s.pts[1][0] >= s.pts[0][0] || s.pts[1][1] < s.pts[0][1]);
+});
+
+// ── filled letterforms and the left-to-right reveal ───────────────────
+//
+// The reveal animation is the default for text, so these guard the geometry it
+// stands on: the outlines must land where the tracing animation's centrelines
+// do, and the pen must sweep the letters rather than wander off them.
+
+const FONT_PATH = '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf';
+const font = (() => {
+  try {
+    const buf = readFileSync(FONT_PATH);
+    return opentype.parse(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
+  } catch {
+    return null;                              // no DejaVu installed; skip below
+  }
+})();
+
+setSurfaceFactory((w, h) => {
+  const canvas = createCanvas(w, h);
+  return { canvas, ctx: canvas.getContext('2d') };
+});
+
+/** Surfaces sized the way renderFrame sizes them, so advance() can draw. */
+const surfacesFor = (plan) => {
+  const b = plan.bbox;
+  return new ClipSurfaces(b[2] - b[0] + 64, b[3] - b[1] + 64, b[0] - 32, b[1] - 32);
+};
+
+test('outlined text keeps the real letterforms, counters and all', { skip: !font }, () => {
+  const out = outlineText(font, 'oil', { fontSize: 100 });
+  assert.equal(out.regions.length, 3, 'one region per inked glyph');
+  // An 'o' is an outer contour plus its counter; without both, an evenodd fill
+  // would paint a solid blob instead of a letter.
+  assert.equal(out.regions[0].rings.length, 2, "'o' must keep its counter");
+  assert.equal(out.regions[2].rings.length, 1, "'l' is a single contour");
+});
+
+test('outline and centreline layouts agree on where a glyph sits', { skip: !font }, async () => {
+  // A clip switched between the two text animations must not move. Both derive
+  // from placeGlyphs, but by different routes -- opentype's own transform for
+  // one, a hand-written mapping for the other.
+  const size = 100;
+  const out = outlineText(font, 'H', { fontSize: size });
+  const traced = await layoutText(font, 'H', {
+    fontSize: size,
+    // Stand in for the sidecar: a single centreline down the glyph's middle,
+    // in font units, y-up. Its x must land inside the outline's x range.
+    getSkeleton: () => ({ strokes: [{ pts: [[400, 0], [400, 700]], length: 700 }] }),
+  });
+
+  const [x0, , x1] = out.inkBbox;
+  const cx = traced.strokes.find((s) => !s.lift).pts[0];
+  assert.ok(cx > x0 && cx < x1, `centreline x ${cx} outside outline ${x0}..${x1}`);
+  assert.deepEqual(out.bbox, traced.bbox, 'and both claim the same bounds');
+});
+
+test('a span is a word, not a letter', { skip: !font }, () => {
+  const out = outlineText(font, 'Hello world again', { fontSize: 100 });
+  assert.equal(out.lines[0].spans.length, 3, 'three words, three spans');
+  // Spans must not overlap and must run left to right.
+  const spans = out.lines[0].spans;
+  for (let i = 1; i < spans.length; i++) {
+    assert.ok(spans[i][0] > spans[i - 1][1], 'spans are disjoint and ordered');
+  }
+});
+
+test('each line gets its own band and spans', { skip: !font }, () => {
+  const out = outlineText(font, 'ab\ncd ef', { fontSize: 100 });
+  assert.equal(out.lines.length, 2);
+  assert.equal(out.lines[0].spans.length, 1);
+  assert.equal(out.lines[1].spans.length, 2);
+  assert.ok(out.lines[1].y0 > out.lines[0].y1, 'the second line sits below the first');
+});
+
+test('a blank line contributes nothing to write', { skip: !font }, () => {
+  const out = outlineText(font, 'a\n\nb', { fontSize: 100 });
+  assert.equal(out.lines.length, 3);
+  assert.equal(out.lines[1].spans.length, 0);
+  const segs = buildSegments(out.lines);
+  assert.ok(segs.every((s) => s.li !== 1), 'the empty line yields no segments');
+});
+
+test('the reveal sweeps left to right and stays on the letters', { skip: !font }, async () => {
+  const out = outlineText(font, 'Hello world', { fontSize: 150 });
+  const plan = await textReveal.compile({ id: 't1', layout: out });
+  const sf = surfacesFor(plan);
+  const band = out.lines[0];
+
+  let prevX = -Infinity;
+  let lifts = 0;
+  for (let i = 0; i <= 120; i++) {
+    const pen = textReveal.advance(sf, plan, i / 120);
+    assert.ok(pen.x >= prevX - 1e-9, `frontier went backwards at ${i}`);
+    prevX = pen.x;
+    assert.ok(pen.y >= band.y0 && pen.y <= band.y1,
+      `pen left the letters: ${pen.y} outside ${band.y0}..${band.y1}`);
+    assert.equal(pen.active, true, 'the hand never vanishes mid-write');
+    if (!pen.down) lifts++;
+  }
+  assert.ok(lifts > 0, 'the pen must lift crossing the space between words');
+  assert.ok(lifts < 20, 'but a hop is brief, not a stall');
+});
+
+test('the hand oscillates rather than tracking the baseline', { skip: !font }, async () => {
+  const out = outlineText(font, 'Hello world', { fontSize: 150 });
+  const plan = await textReveal.compile({ id: 't1', layout: out });
+  const sf = surfacesFor(plan);
+
+  const ys = [];
+  for (let i = 0; i <= 200; i++) ys.push(textReveal.advance(sf, plan, i / 200).y);
+  const span = Math.max(...ys) - Math.min(...ys);
+  const band = out.lines[0].y1 - out.lines[0].y0;
+  assert.ok(span > band * 0.5, `hand barely moved: ${span.toFixed(0)} over a ${band.toFixed(0)} band`);
+
+  // Several up-down cycles, not one slow drift: count sign changes.
+  let turns = 0;
+  for (let i = 2; i < ys.length; i++) {
+    if (Math.sign(ys[i] - ys[i - 1]) !== Math.sign(ys[i - 1] - ys[i - 2])) turns++;
+  }
+  assert.ok(turns >= 8, `expected repeated strokes, saw ${turns} direction changes`);
+});
+
+test('the reveal is a pure function of u', { skip: !font }, async () => {
+  const out = outlineText(font, 'Hello world', { fontSize: 150 });
+  const plan = await textReveal.compile({ id: 't1', layout: out });
+  const sf = surfacesFor(plan);
+
+  // Walked forward, then asked again for a point already passed. Scrubbing
+  // backward must reproduce the frame exactly, and nothing may consume
+  // randomness on the way.
+  const real = Math.random;
+  Math.random = () => { throw new Error('textReveal consumed randomness'); };
+  try {
+    const first = textReveal.advance(sf, plan, 0.42);
+    for (let i = 0; i <= 100; i++) textReveal.advance(sf, plan, i / 100);
+    assert.deepEqual(textReveal.advance(sf, plan, 0.42), first);
+  } finally {
+    Math.random = real;
+  }
+});
+
+test('nothing is revealed at u=0 and everything at u=1', { skip: !font }, async () => {
+  const out = outlineText(font, 'Hi there', { fontSize: 120 });
+  const plan = await textReveal.compile({ id: 't1', layout: out });
+  const sf = surfacesFor(plan);
+
+  const covered = () => {
+    const { data } = sf.fill.active.ctx.getImageData(0, 0, sf.w, sf.h);
+    let n = 0;
+    for (let i = 3; i < data.length; i += 4) if (data[i] > 128) n++;
+    return n;
+  };
+
+  textReveal.advance(sf, plan, 0);
+  assert.equal(covered(), 0, 'the page starts blank');
+  textReveal.advance(sf, plan, 0.5);
+  const half = covered();
+  assert.ok(half > 0, 'and fills in as it goes');
+  textReveal.advance(sf, plan, 1);
+  assert.ok(covered() > half * 1.5, 'ending fully revealed');
+});
+
+test('erase finds the ink on a reveal plan, which has no strokes', { skip: !font }, async () => {
+  // hasInk/inkExtent scan plan.strokes, and a reveal has none -- the ink is the
+  // masked artwork. Without the inkBbox fallback, Erase silently does nothing.
+  const out = outlineText(font, 'Hello', { fontSize: 120 });
+  const plan = await textReveal.compile({ id: 't1', layout: out });
+  assert.equal(plan.strokes.length, 0);
+  assert.ok(hasInk(plan), 'the clip plainly has ink');
+
+  const sweep = compileErase(plan, { id: 't1' });
+  assert.ok(sweep.strokes.length > 0, 'so it must produce a sweep');
+  assert.ok(sweep.width > 3, 'sized off the text, not the 3px stroke default');
+});
+
+test('the hand holds its pose instead of rocking about the nib', { skip: !font }, async () => {
+  // Deriving the tangent from the near-vertical sweep slams it between roughly
+  // +78 and -78 degrees twice per letter; the rig turns that into a visible
+  // wag about the pen tip. The pose must be steady while the wrist moves.
+  const out = outlineText(font, 'Hello world', { fontSize: 150 });
+  const plan = await textReveal.compile({ id: 't1', layout: out });
+  const sf = surfacesFor(plan);
+
+  const angles = new Set();
+  for (let i = 0; i <= 200; i++) angles.add(textReveal.advance(sf, plan, i / 200).tangent);
+  assert.deepEqual([...angles], [0], 'the pen angle must not vary with the sweep');
 });

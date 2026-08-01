@@ -1,8 +1,16 @@
 /**
- * Handwriting pipeline end to end: string + font -> centreline strokes -> MP4.
+ * Text pipeline end to end: string + font -> MP4.
+ *
+ * Both text animations render from here, because the only honest way to judge
+ * either is to look at the frames.
  *
  *   node scripts/animate-text.js "Hello world" [--font path.ttf] [--size 150]
  *                                [--seconds 6] [--frames-only] [--no-hand]
+ *                                [--reveal]
+ *
+ * `--reveal` uses draw.textReveal: the real filled letterforms appear left to
+ * right under an oscillating hand. Without it, draw.handwrite traces the
+ * skeletonised centrelines, which needs the Python sidecar.
  */
 
 import { createCanvas, loadImage } from '@napi-rs/canvas';
@@ -12,12 +20,14 @@ import { fileURLToPath } from 'node:url';
 import opentype from 'opentype.js';
 
 import { setSurfaceFactory } from '../src/engine/render/surfaces.js';
-import { createSession, renderFrame } from '../src/engine/render/renderFrame.js';
+import { createSession, ensureSurfaces, renderFrame } from '../src/engine/render/renderFrame.js';
 import { Sidecar } from '../src/engine/sidecar/client.js';
-import { layoutText } from '../src/engine/compile/text.js';
+import { layoutText, outlineText } from '../src/engine/compile/text.js';
 import { exportVideo } from '../src/engine/export/driver.js';
 import { compileErase } from '../src/engine/anim/erase.js';
+import { paintVectorArt } from '../src/engine/render/vectorArt.js';
 import handwrite from '../src/engine/anim/handwrite.js';
+import textReveal from '../src/engine/anim/textReveal.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -38,6 +48,7 @@ const OUT = resolve(ROOT, arg('--out', 'text.mp4'));
 const SHOW_HAND = !flag('--no-hand');
 const FRAMES_ONLY = flag('--frames-only');
 const ERASE = Number(arg('--erase', 0));
+const REVEAL = flag('--reveal');
 
 const WIDTH = 1920;
 const HEIGHT = 1080;
@@ -49,34 +60,45 @@ async function main() {
   const fontBuf = readFileSync(FONT);
   const font = opentype.parse(fontBuf.buffer.slice(
     fontBuf.byteOffset, fontBuf.byteOffset + fontBuf.byteLength));
-  const sidecar = new Sidecar({ root: ROOT, cacheDir: join(ROOT, '.cache') });
-
   console.log(`writing "${TEXT}" in ${font.names.fullName?.en || FONT}`);
   const t0 = Date.now();
-  const layout = await layoutText(font, TEXT, {
-    fontSize: SIZE,
-    penWidth: Math.max(2, SIZE * 0.05),
-    getSkeleton: (commands, key) => sidecar.skeletonizeGlyph(commands, {
-      key, unitsPerEm: font.unitsPerEm, size: 256, supersample: 2,
-    }),
-  });
-  sidecar.stop();
+  let layout;
 
-  const drawn = layout.strokes.filter((s) => !s.lift).length;
-  console.log(`  ${layout.strokes.length} strokes (${drawn} drawn, `
-            + `${layout.strokes.length - drawn} pen-lifts) in `
-            + `${((Date.now() - t0) / 1000).toFixed(1)}s`);
-  if (!layout.monoline) {
-    console.log('  note: this face is modulated (serif/high-contrast); '
-              + 'centrelines will read as traced type rather than handwriting');
+  if (REVEAL) {
+    // No sidecar at all: the reveal keeps the filled outline, so there is no
+    // centreline to compute.
+    layout = outlineText(font, TEXT, { fontSize: SIZE, penWidth: Math.max(2, SIZE * 0.05) });
+    const spans = layout.lines.reduce((n, l) => n + l.spans.length, 0);
+    console.log(`  ${layout.regions.length} glyphs, ${spans} word span(s) in `
+              + `${((Date.now() - t0) / 1000).toFixed(2)}s (no sidecar)`);
+    if (!layout.regions.length) throw new Error('no glyph outlines produced');
+  } else {
+    const sidecar = new Sidecar({ root: ROOT, cacheDir: join(ROOT, '.cache') });
+    layout = await layoutText(font, TEXT, {
+      fontSize: SIZE,
+      penWidth: Math.max(2, SIZE * 0.05),
+      getSkeleton: (commands, key) => sidecar.skeletonizeGlyph(commands, {
+        key, unitsPerEm: font.unitsPerEm, size: 256, supersample: 2,
+      }),
+    });
+    sidecar.stop();
+
+    const drawn = layout.strokes.filter((s) => !s.lift).length;
+    console.log(`  ${layout.strokes.length} strokes (${drawn} drawn, `
+              + `${layout.strokes.length - drawn} pen-lifts) in `
+              + `${((Date.now() - t0) / 1000).toFixed(1)}s`);
+    if (!layout.monoline) {
+      console.log('  note: this face is modulated (serif/high-contrast); '
+                + 'centrelines will read as traced type rather than handwriting');
+    }
+    if (!drawn) throw new Error('no strokes produced');
   }
-  if (!drawn) throw new Error('no strokes produced');
 
   const project = {
     meta: { fps: FPS, width: WIDTH, height: HEIGHT, background: '#fdfdfb' },
     pages: [{ id: 'p1', cameraKeyframes: [{ t: 0, x: 0, y: 0, zoom: 1 }] }],
     clips: [{
-      id: 't1', assetId: 'text', animId: 'draw.handwrite',
+      id: 't1', assetId: 'text', animId: REVEAL ? 'draw.textReveal' : 'draw.handwrite',
       start: 0, duration: SECONDS,
       ...(ERASE ? { erase: { start: SECONDS + 0.4, duration: ERASE } } : {}),
       transform: { x: -layout.width / 2, y: layout.height / 2, scale: 1, rotation: 0 },
@@ -91,9 +113,18 @@ async function main() {
     hands: new Map([[handStyle.id, handStyle]]),
     resolveImage: (src) => images.get(src.file),
   });
-  const textPlan = await handwrite.compile({ layout });
+  const textPlan = REVEAL
+    ? await textReveal.compile({ id: 't1', layout })
+    : await handwrite.compile({ layout });
   session.plans.set('t1', textPlan);
   if (ERASE) session.erasePlans.set('t1', compileErase(textPlan, { id: 't1' }));
+
+  // The reveal masks artwork rather than laying ink, so the letterforms have to
+  // be painted into `art` first -- exactly as a vector clip's fills are.
+  if (REVEAL) {
+    ensureSurfaces(session, project);
+    paintVectorArt(session.surfaces.get('t1').ensureArt().ctx, layout.regions, []);
+  }
 
   const canvas = createCanvas(WIDTH, HEIGHT);
   const ctx = canvas.getContext('2d');

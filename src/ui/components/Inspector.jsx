@@ -1,5 +1,5 @@
 import React from 'react';
-import { pageAt, pageWindows } from '../../engine/model/project.js';
+import { ANIMATIONS_FOR_KIND, pageAt, pageWindows } from '../../engine/model/project.js';
 import { cameraAt } from '../../engine/render/renderFrame.js';
 import { localToWorld } from '../stageGeom.js';
 import { Field, Group, Icon, Num, PATH, Soon } from './common.jsx';
@@ -10,10 +10,11 @@ import { Field, Group, Icon, Num, PATH, Soon } from './common.jsx';
  */
 const FRAME_MARGIN = 1.24;
 
-const ANIMATIONS = [
-  ['draw.outlineFill', 'Outline, then colour'],
-  ['draw.handwrite', 'Handwriting'],
-];
+const ANIMATION_LABELS = {
+  'draw.outlineFill': 'Outline, then colour',
+  'draw.textReveal': 'Write (letters appear)',
+  'draw.handwrite': 'Trace letterforms',
+};
 
 const TRANSITION_LABELS = [
   ['swipeLeft', 'Swipe left'],
@@ -49,9 +50,19 @@ function ClipInspector({ ed, clip, asset, frame, fps, selection, bboxes }) {
             value={clip.animId}
             onChange={(e) => ed.patchClip(clip.id, { animId: e.target.value })}
           >
-            {ANIMATIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            {/* Only the animations that suit this asset. The list used to be
+                flat, which offered handwriting on a photograph. */}
+            {(ANIMATIONS_FOR_KIND[asset.kind] ?? Object.keys(ANIMATION_LABELS))
+              .map((v) => <option key={v} value={v}>{ANIMATION_LABELS[v]}</option>)}
           </select>
         </Field>
+        {asset.kind === 'text' && clip.animId === 'draw.handwrite' && (
+          <div className="hint">
+            Traces a centreline through each letter. Faithful on near-monoline
+            faces; on a modulated one it reads as traced type rather than
+            handwriting — “Write” draws the real letterforms instead.
+          </div>
+        )}
         <TrackField tracks={ed.doc.tracks} kind="clip" value={clip.trackId}
           onChange={(trackId) => ed.patchClip(clip.id, { trackId })} />
         <Field label="Page">

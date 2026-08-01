@@ -19,7 +19,7 @@ import { setSurfaceFactory } from '../src/engine/render/surfaces.js';
 import { createSession, ensureSurfaces, renderFrame } from '../src/engine/render/renderFrame.js';
 import { normalizeProject, projectFrames } from '../src/engine/model/project.js';
 import { Sidecar, toAsset } from '../src/engine/sidecar/client.js';
-import { layoutText } from '../src/engine/compile/text.js';
+import { layoutText, outlineText } from '../src/engine/compile/text.js';
 import { parseSvg } from '../src/engine/compile/svgDoc.js';
 import { paintVectorArt } from '../src/engine/render/vectorArt.js';
 import { compileErase } from '../src/engine/anim/erase.js';
@@ -27,6 +27,7 @@ import { exportVideo } from '../src/engine/export/driver.js';
 import { styleIdsFor } from '../src/engine/hand/styles.js';
 import outlineFill from '../src/engine/anim/outlineFill.js';
 import handwrite from '../src/engine/anim/handwrite.js';
+import textReveal from '../src/engine/anim/textReveal.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -81,10 +82,21 @@ async function buildTextClip(session, sidecar, project, clip, asset) {
   // loadSync is deprecated in opentype.js and silently returns undefined.
   const font = opentype.parse(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
 
-  const layout = await layoutText(font, asset.text, {
+  const opts = {
     fontSize: asset.fontSize ?? 120,
     penWidth: asset.penWidth ?? Math.max(2, (asset.fontSize ?? 120) * 0.045),
     color: asset.color,
+  };
+
+  // Same branch as electron/prepare.js, and it has to stay that way: preview and
+  // export must build byte-identical plans from the same document.
+  if (clip.animId === 'draw.textReveal') {
+    const layout = outlineText(font, asset.text, opts);
+    return { plan: await textReveal.compile({ id: clip.id, layout }), layout, vector: layout };
+  }
+
+  const layout = await layoutText(font, asset.text, {
+    ...opts,
     getSkeleton: (commands, key) => sidecar.skeletonizeGlyph(commands, {
       key, unitsPerEm: font.unitsPerEm, size: 256, supersample: 2,
     }),

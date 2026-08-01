@@ -7,6 +7,7 @@ import {
 } from '../src/engine/compile/geometry.js';
 import { spansAt, decomposeCells, scribbleRegion, mulberry32 } from '../src/engine/compile/scribble.js';
 import { minScale, exitDistance, solveHand, elbowOutside, EDGE_MARGIN } from '../src/engine/hand/rig.js';
+import { HAND_STYLE_IDS } from '../src/engine/hand/styles.js';
 
 const ring = (...xy) => Float64Array.from(xy);
 const rect = (x0, y0, x1, y1) => ring(x0, y0, x1, y0, x1, y1, x0, y1);
@@ -172,18 +173,33 @@ test('calibrated hand1 manifest has the geometry the rig depends on', () => {
   assert.ok(Math.abs(src.armLenPx - 1921.7) < 0.5, `armLenPx ${src.armLenPx}`);
 });
 
-test('minScale matches the closed-form derivation for hand1 at 1080p', () => {
+test('minScale still agrees with the old closed form for a near-vertical limb', () => {
+  // The general form sweeps the rotation clamp and takes the frame's span along
+  // the limb. For an arm that leaves through the bottom edge, H/|uy| dominates
+  // and it must reproduce the closed form it replaced -- if it does not, the
+  // generalisation changed behaviour for the hands that already worked.
   const src = hand1.sources.find((s) => s.h === 1920);
-  const s = minScale(hand1, src, 1080);
+  const s = minScale(hand1, src, { w: 1920, h: 1080 });
   const tilt = Math.abs(Math.atan2(src.armExitPx[0] - src.tipPx[0], src.armExitPx[1] - src.tipPx[1]));
-  const expected = (1080 + EDGE_MARGIN) / (src.armLenPx * Math.cos(25 * Math.PI / 180 + tilt));
-  assert.ok(Math.abs(s - expected) < 1e-12);
-  assert.ok(Math.abs(s - 0.647) < 0.002, `expected ~0.647, got ${s}`);
+  const closedForm = (1080 + EDGE_MARGIN) / (src.armLenPx * Math.cos(25 * Math.PI / 180 + tilt));
+  assert.ok(Math.abs(s - closedForm) < 0.005, `${s} vs closed form ${closedForm}`);
+  assert.ok(Math.abs(s - 0.647) < 0.005, `expected ~0.647, got ${s}`);
+});
+
+test('a limb leaving through a side edge does not blow the scale up', () => {
+  // hand3's forearm exits the LEFT edge at 64deg off that edge's normal. The
+  // old per-edge formula divided by cos(25 + 64), i.e. almost zero, and asked
+  // for a scale of ~34 -- a sprite twenty times wider than the frame.
+  const hand3 = JSON.parse(readFileSync(new URL('../assets/hands/hand3.json', import.meta.url)));
+  const src = hand3.sources[0];
+  assert.equal(hand3.anchorEdge, 'left');
+  const s = minScale(hand3, src, { w: 1920, h: 1080 });
+  assert.ok(s > 0.3 && s < 1.6, `expected a usable scale, got ${s}`);
 });
 
 test('hand1 at 1080p occupies a sane fraction of the frame', () => {
   const src = hand1.sources.find((s) => s.h === 1920);
-  const s = minScale(hand1, src, 1080);
+  const s = minScale(hand1, src, { w: 1920, h: 1080 });
   const bboxW = src.opaqueBBox[2] - src.opaqueBBox[0] + 1;
   const frac = (s * bboxW) / 1920;
   assert.ok(frac > 0.15 && frac < 0.30, `hand covers ${(frac * 100).toFixed(1)}% of frame width`);
@@ -198,6 +214,28 @@ test('the limb clears the frame for nib positions across the whole frame', () =>
         const sol = solveHand(hand1, tip, tangent, frame);
         assert.ok(elbowOutside(hand1, sol, frame),
           `detached at (${tip.x.toFixed(0)},${tip.y.toFixed(0)}) tangent ${tangent.toFixed(2)}`);
+      }
+    }
+  }
+});
+
+test('every drawing hand clears the frame from any nib position', () => {
+  // The whole point of the constraint: a hand that visibly floats detached from
+  // its arm destroys the effect. Run the grid over every shipped style, not
+  // just hand1 -- hand3's forearm leaves through a side edge, which is the case
+  // the old scale formula got wrong, and only this check would have caught it.
+  const frame = { w: 1920, h: 1080 };
+  for (const id of HAND_STYLE_IDS) {
+    const style = JSON.parse(readFileSync(new URL(`../assets/hands/${id}.json`, import.meta.url)));
+    if (style.constraint === 'none') continue;
+    for (let gy = 0; gy <= 6; gy++) {
+      for (let gx = 0; gx <= 6; gx++) {
+        const tip = { x: (gx / 6) * frame.w, y: (gy / 6) * frame.h };
+        for (const tangent of [0, Math.PI / 2, -Math.PI / 2]) {
+          const sol = solveHand(style, tip, tangent, frame);
+          assert.ok(elbowOutside(style, sol, frame),
+            `${id} detached at (${tip.x.toFixed(0)},${tip.y.toFixed(0)})`);
+        }
       }
     }
   }
