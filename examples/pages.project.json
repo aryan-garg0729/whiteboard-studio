@@ -1,0 +1,95 @@
+{
+  "meta": {
+    "fps": 30,
+    "width": 1920,
+    "height": 1080,
+    "handStyleId": "hand2"
+  },
+  "pages": [
+    {
+      "id": "p1",
+      "name": "Shapes"
+    },
+    {
+      "id": "p2",
+      "name": "Notes"
+    }
+  ],
+  "pageBreaks": [
+    {
+      "t": 6.0,
+      "pageId": "p2",
+      "transition": "swipeLeft",
+      "duration": 0.8
+    },
+    {
+      "t": 12.0,
+      "pageId": "p1",
+      "transition": "swipeRight",
+      "duration": 0.8
+    }
+  ],
+  "assets": {
+    "logo": {
+      "kind": "vector",
+      "src": "shapes.svg"
+    },
+    "t1": {
+      "kind": "text",
+      "text": "Notes",
+      "fontSize": 150,
+      "penWidth": 6
+    },
+    "t2": {
+      "kind": "text",
+      "text": "back again",
+      "fontSize": 110,
+      "penWidth": 5
+    }
+  },
+  "clips": [
+    {
+      "id": "shapes",
+      "assetId": "logo",
+      "animId": "draw.outlineFill",
+      "pageId": "p1",
+      "start": 0,
+      "duration": 5,
+      "transform": {
+        "x": -215,
+        "y": -180,
+        "scale": 1.1,
+        "rotation": 0
+      }
+    },
+    {
+      "id": "notes",
+      "assetId": "t1",
+      "animId": "draw.handwrite",
+      "pageId": "p2",
+      "start": 7.2,
+      "duration": 3.5,
+      "transform": {
+        "x": -215,
+        "y": -60,
+        "scale": 1,
+        "rotation": 0
+      }
+    },
+    {
+      "id": "back",
+      "assetId": "t2",
+      "animId": "draw.handwrite",
+      "pageId": "p1",
+      "start": 13.2,
+      "duration": 3.5,
+      "transform": {
+        "x": -300,
+        "y": 260,
+        "scale": 1,
+        "rotation": 0
+      }
+    }
+  ],
+  "audio": []
+}

@@ -1,0 +1,81 @@
+{
+  "schema": 1,
+  "id": "hand1",
+  "label": "Right hand, ballpoint",
+  "handedness": "right",
+  "tool": {
+    "type": "pen",
+    "inkWidth": 4.0
+  },
+  "anchorEdge": "bottom",
+  "constraint": "edge",
+  "naturalAngleDeg": 1.2,
+  "alignFactor": 0.16,
+  "maxRotationDeg": 25,
+  "stretchBand": [
+    0.7193,
+    0.9995
+  ],
+  "sources": [
+    {
+      "w": 720,
+      "h": 1280,
+      "file": "hands/hand1-720p.png",
+      "tipPx": [
+        381.4,
+        0.0
+      ],
+      "opaqueBBox": [
+        173,
+        0,
+        607,
+        1279
+      ],
+      "armExitPx": [
+        327.8,
+        1280.0
+      ],
+      "armLenPx": 1281.1
+    },
+    {
+      "w": 1080,
+      "h": 1920,
+      "file": "hands/hand1-1080p.png",
+      "tipPx": [
+        542.9,
+        0.0
+      ],
+      "opaqueBBox": [
+        230,
+        0,
+        882,
+        1919
+      ],
+      "armExitPx": [
+        462.2,
+        1920.0
+      ],
+      "armLenPx": 1921.7
+    },
+    {
+      "w": 1440,
+      "h": 2560,
+      "file": "hands/hand1-1440p.png",
+      "tipPx": [
+        748.4,
+        0.0
+      ],
+      "opaqueBBox": [
+        331,
+        0,
+        1200,
+        2559
+      ],
+      "armExitPx": [
+        641.3,
+        2560.0
+      ],
+      "armLenPx": 2562.2
+    }
+  ]
+}

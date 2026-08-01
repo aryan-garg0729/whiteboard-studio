@@ -1,0 +1,9 @@
+.venv/
+node_modules/
+.preview/
+.cache/
+__pycache__/
+*.pyc
+out*.mp4
+demo.mp4
+text.mp4

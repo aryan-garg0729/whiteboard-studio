@@ -1,0 +1,43 @@
+{
+  "meta": {
+    "version": 1,
+    "fps": 30,
+    "width": 1920,
+    "height": 1080,
+    "background": "#fdfdfb",
+    "handStyleId": "hand1"
+  },
+  "assets": {
+    "cup": { "kind": "image", "src": "../assets/demo/lineart.png" },
+    "caption": {
+      "kind": "text",
+      "text": "Fresh coffee",
+      "fontSize": 120,
+      "penWidth": 5
+    }
+  },
+  "pages": [
+    { "id": "page1", "cameraKeyframes": [{ "t": 0, "x": 0, "y": 0, "zoom": 1 }] }
+  ],
+  "clips": [
+    {
+      "id": "img",
+      "assetId": "cup",
+      "animId": "draw.outlineFill",
+      "start": 0.2,
+      "duration": 4.2,
+      "erase": { "start": 8.8, "duration": 2.4 },
+      "transform": { "x": -403, "y": -324, "scale": 0.8, "rotation": 0 }
+    },
+    {
+      "id": "txt",
+      "assetId": "caption",
+      "animId": "draw.handwrite",
+      "start": 4.8,
+      "duration": 3.4,
+      "erase": { "start": 9.3, "duration": 1.9 },
+      "transform": { "x": -390, "y": 400, "scale": 1, "rotation": 0 }
+    }
+  ],
+  "audio": []
+}

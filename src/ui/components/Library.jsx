@@ -1,0 +1,192 @@
+import React, { useMemo, useState } from 'react';
+import { Field, Group, Icon, Num, PATH, Soon } from './common.jsx';
+
+const TABS = [
+  ['media', 'Media'],
+  ['text', 'Text'],
+  ['hand', 'Hand'],
+];
+
+function MediaTab({ library, onImport, onPlace, onAddAudio }) {
+  return (
+    <>
+      <div className="lib-section">
+        <div className="row">
+          <button className="btn wide" onClick={() => onImport('image')}>
+            <Icon d={PATH.image} /> Image / SVG
+          </button>
+          <button className="btn wide" onClick={() => onImport('audio')}>
+            <Icon d={PATH.audio} /> Audio
+          </button>
+        </div>
+        <div className="hint">Drop files anywhere in the window to import.</div>
+      </div>
+
+      {library.length === 0 ? (
+        <div className="lib-hint">
+          Nothing imported yet.<br />
+          PNG, JPG, WebP and SVG become drawings; MP3 and WAV become the
+          soundtrack.
+        </div>
+      ) : (
+        <div className="asset-grid">
+          {library.map((a) => (
+            <button
+              key={a.path}
+              className="asset-card"
+              title={`${a.path}\nClick to add, or drag onto the canvas to place it`}
+              // Artwork can be dragged onto the stage to land at a chosen spot;
+              // audio has no position, so it is click-to-add only.
+              draggable={a.kind !== 'audio'}
+              onDragStart={(e) => {
+                e.dataTransfer.effectAllowed = 'copy';
+                e.dataTransfer.setData('application/x-studio-asset',
+                  JSON.stringify({ path: a.path, kind: a.kind }));
+              }}
+              onClick={() => (a.kind === 'audio' ? onAddAudio(a) : onPlace(a))}
+            >
+              <div className={a.kind === 'audio' ? 'thumb audio-thumb' : 'thumb'}>
+                {a.kind === 'audio'
+                  ? <Icon d={PATH.audio} size={22} />
+                  : <img src={a.thumb} alt="" />}
+              </div>
+              <div className="meta">
+                {a.name}
+                {a.kind === 'audio' && a.duration
+                  ? ` · ${a.duration.toFixed(1)}s`
+                  : ''}
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
+function TextTab({ fonts, draft, setDraft, onAdd }) {
+  const [filter, setFilter] = useState('');
+  const shown = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    const list = q ? fonts.filter((f) => f.family.toLowerCase().includes(q)) : fonts;
+    return list.slice(0, 300);
+  }, [fonts, filter]);
+
+  return (
+    <div className="lib-section" style={{ borderBottom: 0 }}>
+      <Field label="Text" stack>
+        <textarea
+          value={draft.text}
+          placeholder={'Type a line…\nEnter starts a new line'}
+          onChange={(e) => setDraft({ ...draft, text: e.target.value })}
+          onKeyDown={(e) => e.stopPropagation()}
+        />
+      </Field>
+
+      <Field label="Font" stack>
+        <input
+          type="text"
+          placeholder={`Search ${fonts.length} fonts…`}
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          onKeyDown={(e) => e.stopPropagation()}
+        />
+      </Field>
+      <div className="font-list">
+        {shown.map((f) => (
+          <button
+            key={f.path}
+            aria-selected={draft.font === f.path}
+            title={f.path}
+            onClick={() => setDraft({ ...draft, font: f.path, fontFamily: f.family })}
+          >
+            {f.family}
+            {/* Skeletonising a modulated face gives lumpy centrelines; the
+                script-like families are the ones that read as handwriting. */}
+            {f.hand && <span className="hand-tag">script</span>}
+          </button>
+        ))}
+        {shown.length === 0 && <div className="lib-hint">No match</div>}
+      </div>
+
+      <div className="pair">
+        <Field label="Size">
+          <Num value={draft.fontSize} min={8} max={600} step={4}
+               onChange={(fontSize) => setDraft({ ...draft, fontSize })} />
+        </Field>
+        <Field label="Pen">
+          <Num value={draft.penWidth} min={0.5} max={40} step={0.5}
+               onChange={(penWidth) => setDraft({ ...draft, penWidth })} />
+        </Field>
+      </div>
+      <Field label="Ink">
+        <input type="color" value={draft.color}
+               onChange={(e) => setDraft({ ...draft, color: e.target.value })} />
+      </Field>
+
+      <button className="btn primary wide" disabled={!draft.text.trim()} onClick={onAdd}>
+        <Icon d={PATH.plus} /> Add text clip
+      </button>
+      <div className="hint">
+        Letters are written as true centre-line strokes, so the pen follows the
+        shape of each character rather than wiping a rendered word.
+      </div>
+    </div>
+  );
+}
+
+function HandTab({ hands, meta, onMeta }) {
+  return (
+    <>
+      <div className="lib-section">
+        <label className="check">
+          <input type="checkbox" checked={meta.showHand !== false}
+                 onChange={(e) => onMeta({ showHand: e.target.checked })} />
+          Show hand while drawing
+        </label>
+        <div className="hint">
+          With the hand off, ink simply appears at the pen front. Rendering is
+          otherwise identical.
+        </div>
+      </div>
+
+      <div>
+        {hands.map((h) => (
+          <button
+            key={h.id}
+            className="hand-row"
+            aria-selected={meta.handStyleId === h.id}
+            onClick={() => onMeta({ handStyleId: h.id })}
+          >
+            <Icon d={h.tool === 'eraser' ? PATH.eraser : PATH.hand} size={15} />
+            <span>
+              {h.label}
+              <br /><span className="sub">{h.id} · {h.tool}</span>
+            </span>
+          </button>
+        ))}
+      </div>
+    </>
+  );
+}
+
+export default function Library(props) {
+  const [tab, setTab] = useState('media');
+  return (
+    <aside className="panel">
+      <div className="panel-head"><span className="panel-title">Library</span></div>
+      <div className="tabs">
+        {TABS.map(([id, label]) => (
+          <button key={id} aria-selected={tab === id} onClick={() => setTab(id)}>
+            {label}
+          </button>
+        ))}
+      </div>
+      <div className="panel-body">
+        {tab === 'media' && <MediaTab {...props} />}
+        {tab === 'text' && <TextTab {...props} />}
+        {tab === 'hand' && <HandTab {...props} />}
+      </div>
+    </aside>
+  );
+}

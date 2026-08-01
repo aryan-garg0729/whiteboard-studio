@@ -1,0 +1,41 @@
+{
+  "schema": 1,
+  "id": "eraser",
+  "label": "Right hand, eraser",
+  "handedness": "right",
+  "tool": {
+    "type": "eraser",
+    "inkWidth": 26.0
+  },
+  "anchorEdge": "bottom",
+  "constraint": "edge",
+  "naturalAngleDeg": 7.7,
+  "alignFactor": 0.16,
+  "maxRotationDeg": 25,
+  "stretchBand": [
+    0.7193,
+    0.9995
+  ],
+  "sources": [
+    {
+      "w": 1120,
+      "h": 2038,
+      "file": "hands/eraser-1080p.png",
+      "tipPx": [
+        457.5,
+        68.0
+      ],
+      "opaqueBBox": [
+        244,
+        0,
+        903,
+        2037
+      ],
+      "armExitPx": [
+        546.4,
+        2038.0
+      ],
+      "armLenPx": 1972.0
+    }
+  ]
+}

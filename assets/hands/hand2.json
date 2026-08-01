@@ -1,0 +1,81 @@
+{
+  "schema": 1,
+  "id": "hand2",
+  "label": "Right hand, felt-tip",
+  "handedness": "right",
+  "tool": {
+    "type": "pen",
+    "inkWidth": 4.5
+  },
+  "anchorEdge": "bottom",
+  "constraint": "edge",
+  "naturalAngleDeg": 6.5,
+  "alignFactor": 0.16,
+  "maxRotationDeg": 25,
+  "stretchBand": [
+    0.7193,
+    0.9995
+  ],
+  "sources": [
+    {
+      "w": 720,
+      "h": 1280,
+      "file": "hands/hand2-720p.png",
+      "tipPx": [
+        275.8,
+        0.0
+      ],
+      "opaqueBBox": [
+        184,
+        0,
+        538,
+        1279
+      ],
+      "armExitPx": [
+        351.8,
+        1280.0
+      ],
+      "armLenPx": 1282.3
+    },
+    {
+      "w": 1080,
+      "h": 1920,
+      "file": "hands/hand2-1080p.png",
+      "tipPx": [
+        414.3,
+        0.0
+      ],
+      "opaqueBBox": [
+        277,
+        0,
+        806,
+        1919
+      ],
+      "armExitPx": [
+        528.1,
+        1920.0
+      ],
+      "armLenPx": 1923.4
+    },
+    {
+      "w": 1440,
+      "h": 2560,
+      "file": "hands/hand2-1440p.png",
+      "tipPx": [
+        574.0,
+        0.0
+      ],
+      "opaqueBBox": [
+        391,
+        0,
+        1096,
+        2559
+      ],
+      "armExitPx": [
+        725.8,
+        2560.0
+      ],
+      "armLenPx": 2564.5
+    }
+  ]
+}

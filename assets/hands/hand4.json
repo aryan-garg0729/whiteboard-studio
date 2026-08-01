@@ -1,0 +1,63 @@
+{
+  "schema": 1,
+  "id": "hand4",
+  "label": "Floating pen (no hand)",
+  "handedness": "right",
+  "tool": {
+    "type": "pen",
+    "inkWidth": 4.0
+  },
+  "anchorEdge": null,
+  "constraint": "none",
+  "naturalAngleDeg": 146.8,
+  "alignFactor": 0.16,
+  "maxRotationDeg": 25,
+  "stretchBand": null,
+  "sources": [
+    {
+      "w": 720,
+      "h": 1280,
+      "file": "hands/hand4-720p.png",
+      "tipPx": [
+        135.0,
+        1050.0
+      ],
+      "opaqueBBox": [
+        132,
+        267,
+        594,
+        1050
+      ]
+    },
+    {
+      "w": 1080,
+      "h": 1920,
+      "file": "hands/hand4-1080p.png",
+      "tipPx": [
+        233.6,
+        1510.0
+      ],
+      "opaqueBBox": [
+        229,
+        465,
+        846,
+        1510
+      ]
+    },
+    {
+      "w": 1440,
+      "h": 2560,
+      "file": "hands/hand4-1440p.png",
+      "tipPx": [
+        292.0,
+        2029.0
+      ],
+      "opaqueBBox": [
+        285,
+        509,
+        1182,
+        2029
+      ]
+    }
+  ]
+}
