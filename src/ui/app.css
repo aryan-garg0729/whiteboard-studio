@@ -34,6 +34,7 @@
   --lane-erase: #8a5236;
   --lane-audio: #2f7d63;
   --lane-page: #8a63c9;
+  --lane-camera: #c8923a;
 
   --r: 3px;
   --ui: 11px;
@@ -300,6 +301,8 @@ label.check input { accent-color: var(--accent); }
 /* Direct-manipulation layer. DOM, never canvas: nothing here can leak into a
    rendered frame, because renderFrame owns every exported pixel. */
 .stage-overlay { position: absolute; inset: 0; cursor: default; }
+.stage-overlay.camera { cursor: grab; }
+.stage-overlay.camera:active { cursor: grabbing; }
 .stage-box {
   position: absolute; pointer-events: none;
   outline: 1px dashed rgba(20,115,230,.30); outline-offset: 0;
@@ -491,6 +494,29 @@ label.check input { accent-color: var(--accent); }
 /* The glyph must stay readable when a cut collapses the marker to a hairline. */
 .tl-break .arrow { pointer-events: none; }
 .tl-head[data-kind="page"] { color: var(--text-dim); }
+
+/* Camera lane: like the page lane, a header for everything below rather than a
+   peer of the clip lanes. Keyframes are diamonds and the move between two
+   differing framings is a bar, so a push-in reads as a duration, not a point. */
+.tl-lane.camera { height: 22px; border-bottom: 1px solid #4a4a4a; }
+.tl-head[data-kind="camera"] { color: var(--text-dim); }
+.tl-cammove {
+  position: absolute; top: 5px; height: 12px; border-radius: 2px;
+  background: rgba(200,146,58,.20); border: 1px solid rgba(200,146,58,.55);
+  color: var(--text-dim); font-size: 9px; line-height: 10px; overflow: hidden;
+  pointer-events: none; white-space: nowrap;
+}
+.tl-cammove .label { padding: 0 4px; }
+.tl-camkey {
+  position: absolute; top: 5px; width: 11px; height: 11px; margin-left: -5.5px;
+  z-index: 4; cursor: grab; transform: rotate(45deg);
+  background: var(--lane-camera); box-shadow: 0 0 0 1px rgba(0,0,0,.35);
+}
+.tl-camkey:active { cursor: grabbing; }
+.tl-camkey.sel { outline: 1px solid #fff; outline-offset: 1px; }
+/* A keyframe on a sheet that is not showing at its own time still governs the
+   next visit to that sheet, so it is dimmed rather than hidden. */
+.tl-camkey.off { opacity: .35; }
 
 .tl-clip {
   position: absolute; top: 4px; height: 22px;

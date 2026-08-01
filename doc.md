@@ -210,15 +210,15 @@ mode (`showHand: false`) draws no sprite at all.
 | Export | 1080p MP4 at ~42fps; `ffprobe`-verified h264/yuv420p/exact duration; ffmpeg audio graph |
 | Determinism | Backward-seek == forward playback, byte-identical across sessions |
 | Pages | Multiple sheets with swipe up/down/left/right and cut between them; a page may be revisited and drawn on again, and each visit is its own segment on the timeline's page lane |
+| Camera | Per-page keyframed `{x, y, zoom}`; authored with the stage's Camera tool (`C` — drag to pan, wheel to zoom about the cursor), a timeline camera lane, and "Zoom to selection". **Zoom interpolates geometrically, x/y linearly**, both under the same smoothstep, so the apparent zoom rate is constant. The hand is drawn outside the camera transform and keeps its size on screen |
 
 ### Not started
 
 | Piece | Notes |
 |---|---|
 | **Page curl** | The four swipes and cut ship; the strip-based paper curl does not. `renderPage()` is the seam it would consume — it already hands back a whole page as a bitmap |
-| **Camera keyframes** | `cameraAt()` interpolates them per page; the inspector shows a disabled control |
 | **Backward-scrub snapshots** | Backward seeks still replay from zero — see Known limitations |
-| **Canvas pan/zoom** | The stage fits or zooms to fixed steps; no free navigation |
+| **Editor viewport pan/zoom** | The stage fits or zooms to fixed steps; no free navigation of the *editor view*. Distinct from the document camera, which ships — that one is exported, this one would not be |
 | **Tracer tuning panel** | `vectorize.py` accepts colour count / min area; the inspector shows them disabled |
 
 ---
@@ -234,7 +234,8 @@ mode (`showHand: false`) draws no sprite at all.
 3. **Page curl**, if the swipes ever stop being enough. The "render page to bitmap" path
    it needs exists now: `renderPage()` returns a whole page as pixels, and the transition
    compositor is where a curl would slot in beside the push.
-4. **Camera keyframe editing** on its own timeline track, then tracer tuning.
+4. ~~Camera keyframe editing~~ — **done**; it has its own timeline lane and a stage
+   tool. Tracer tuning is next.
 5. **Packaging** with electron-builder.
 
 ---
@@ -281,6 +282,18 @@ mode (`showHand: false`) draws no sprite at all.
   without a real filesystem path. That case now reports an error and points at Library →
   Import rather than silently discarding the files.
 - **Backward scrubbing is O(everything)** until snapshots land.
+- **Framing a shot plants *two* keyframes, and that is the point.** `withCameraAt()` in
+  `src/ui/state/editor.js` inserts a hold one second earlier carrying the previous framing,
+  so the move *arrives* at the playhead instead of creeping there from the last keyframe —
+  otherwise framing a detail at 20s has the camera drifting for the whole preceding video.
+  The function is idempotent at a given `t`, which is what makes it safe to call on every
+  pointermove of a pan drag; do not "optimise" that into an insert-once path.
+- **A camera move cannot cross a page break.** Keyframes belong to a page, and mid-swipe
+  there are two sheets on screen with no single one to attach a framing to — the stage's
+  Camera tool disables itself there.
+- **The timeline leaves camera keyframes unsorted mid-drag**, exactly as it does page
+  breaks: a drag holds an index, and re-sorting under it would hand the gesture a different
+  keyframe. `normalizeProject` sorts on the way to the renderer.
 - **SVG scope is the drawing subset.** Shapes, groups, transforms, `style`/presentation
   attributes and fill→region all work. Gradients degrade to flat grey rather than vanishing.
   Not supported: `<use>`/`<defs>` references, clip paths, masks, filters, embedded raster —

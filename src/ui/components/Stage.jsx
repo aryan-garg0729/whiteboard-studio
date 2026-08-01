@@ -43,8 +43,10 @@ export default function Stage({
   zoom, setZoom, guides, setGuides, showHand, setShowHand,
   status, error, exporting, dropping,
   hasAudio, muted, setMuted, volume, setVolume,
-  ed, cam, pageId, pageName, pageCount, bboxes, selection, setSelection, onDropAsset,
+  ed, cam, tool, setTool, canCamera, time, pageId, pageName, pageCount,
+  bboxes, selection, setSelection, onDropAsset,
 }) {
+  const camera = tool === 'camera' && canCamera;
   const fps = meta.fps || 30;
   const stageRef = useRef(null);
   const scale = useFitScale(stageRef, meta.width, meta.height, zoom);
@@ -75,13 +77,18 @@ export default function Stage({
         <div className="stage-inner" style={size}>
           <canvas ref={canvasRef} style={size} />
           {guides && <div className="guides" />}
-          {ed && boxes.length > 0 && !status && (
+          {/* Also mounted with no boxes when the camera tool is live: an empty
+              page has nothing to select but still has to be framable. */}
+          {ed && (boxes.length > 0 || camera) && !status && (
             <StageOverlay
               ed={ed}
               meta={meta}
               cam={cam}
               fit={scale}
               boxes={boxes}
+              camera={camera}
+              pageId={pageId}
+              time={time}
               selection={selection}
               setSelection={setSelection}
               onDropAsset={onDropAsset}
@@ -166,6 +173,21 @@ export default function Stage({
         </span>
 
         <div className="spacer" />
+
+        <div className="seg" title={canCamera
+          ? 'Select moves clips; Camera pans and zooms the page (C)'
+          : 'The camera belongs to a page — pick a moment when one sheet is '
+            + 'fully on screen, not mid-swipe'}>
+          <button aria-pressed={tool === 'select'} onClick={() => setTool('select')}>
+            Select
+          </button>
+          {/* Pressed reflects the tool, not whether it is usable here: scrubbing
+              into a swipe disables it for a moment and the mode is still on. */}
+          <button aria-pressed={tool === 'camera'} disabled={!canCamera}
+                  onClick={() => setTool('camera')}>
+            Camera
+          </button>
+        </div>
 
         <label className="check" title="Toggle the drawing hand (H)">
           <input type="checkbox" checked={showHand}

@@ -143,6 +143,82 @@ function PageLane({ doc, pxPerSec, selection, setSelection, onBreakDown }) {
   );
 }
 
+/** Two framings are the same shot when nothing about them reads as different. */
+const sameShot = (a, b) =>
+  Math.abs(a.x - b.x) < 0.5 && Math.abs(a.y - b.y) < 0.5 && Math.abs(a.zoom - b.zoom) < 1e-3;
+
+/**
+ * The camera lane: every keyframe, and the moves between them.
+ *
+ * Keyframes belong to a *page*, but they are laid out on one shared lane at
+ * their absolute time, because that is what the user is actually reasoning
+ * about -- "the camera pushes in here, just before this word is written". A
+ * keyframe whose page is not on screen at its own time is dimmed rather than
+ * hidden: it still affects the framing on the next visit to that page, and
+ * silently dropping it from the lane would make it uneditable.
+ *
+ * Pinned above the clip lanes for the same reason PageLane is: it holds no
+ * clips, cannot be added or removed, and there is exactly one.
+ */
+function CameraLane({ doc, pxPerSec, selection, setSelection, onKeyDown }) {
+  const windows = pageWindows(doc);
+  const onScreen = (pageId, t) =>
+    windows.some((w) => w.pageId === pageId && t >= w.start && t <= w.end);
+
+  return (
+    <div className="tl-lane camera" data-kind="camera">
+      {doc.pages.map((page) => {
+        const kfs = [...(page.cameraKeyframes || [])]
+          .map((k, index) => ({ ...k, index }))
+          .sort((a, b) => a.t - b.t);
+        return (
+          <React.Fragment key={page.id}>
+            {/* The move itself: the span over which the framing changes. This
+                is the thing the auto-inserted hold keyframe exists to create,
+                so drawing it is what makes that hold legible. */}
+            {kfs.slice(1).map((k, i) => {
+              const a = kfs[i];
+              if (sameShot(a, k)) return null;
+              return (
+                <div
+                  key={`m${page.id}-${a.index}`}
+                  className="tl-cammove"
+                  style={{ left: a.t * pxPerSec, width: Math.max(2, (k.t - a.t) * pxPerSec) }}
+                  title={`${page.name}: zoom ${a.zoom}× → ${k.zoom}× over ${round1(k.t - a.t)}s`}
+                >
+                  <span className="label">{`${a.zoom}× → ${k.zoom}×`}</span>
+                </div>
+              );
+            })}
+
+            {kfs.map((k) => {
+              const sel = selection?.type === 'camera'
+                && selection.pageId === page.id && selection.index === k.index;
+              const off = !onScreen(page.id, k.t);
+              return (
+                <div
+                  key={`k${page.id}-${k.index}`}
+                  className={`tl-camkey${sel ? ' sel' : ''}${off ? ' off' : ''}`}
+                  style={{ left: k.t * pxPerSec }}
+                  title={off
+                    ? `${page.name} is not on screen at ${k.t}s — this framing applies `
+                      + 'the next time it is'
+                    : `${page.name} — ${k.x}, ${k.y} at ${k.zoom}× — drag to move`}
+                  onPointerDown={(e) => {
+                    e.stopPropagation();
+                    setSelection({ type: 'camera', pageId: page.id, index: k.index });
+                    onKeyDown(e, page.id, k.index);
+                  }}
+                />
+              );
+            })}
+          </React.Fragment>
+        );
+      })}
+    </div>
+  );
+}
+
 /** Lane header: name (double-click to rename), preview mute, remove. */
 function TrackHead({ track, count, canRemove, muted, onMute, onRename, onRemove }) {
   const [editing, setEditing] = useState(false);
@@ -203,6 +279,9 @@ export default function Timeline({
   const total = Math.max(8, (frames || 0) / fps + 2);
   const width = total * pxPerSec;
   const time = frame / fps;
+  // Which sheet a keyframe added right now would belong to. Mid-swipe this is
+  // the incoming page, which is also where the validator would put a clip.
+  const activePageId = pageAt(doc, time);
 
   // ── lanes ─────────────────────────────────────────────────────────
   // Clip lanes above audio lanes regardless of the order tracks were added in;
@@ -249,6 +328,15 @@ export default function Timeline({
       if (skip?.kind === 'pageBreak' && skip.index === i) return;
       pts.push(b.t, b.t + b.duration);
     });
+    // Camera keyframes too: the point of the whole feature is that a draw
+    // begins exactly where a camera move lands, so those are edges clips very
+    // much want to butt up against.
+    for (const p of doc.pages) {
+      (p.cameraKeyframes || []).forEach((k, i) => {
+        if (skip?.kind === 'camera' && skip.pageId === p.id && skip.index === i) return;
+        pts.push(k.t);
+      });
+    }
     return pts;
   }, [doc, time]);
 
@@ -275,7 +363,12 @@ export default function Timeline({
       ? { start: clip.start, duration: clip.duration, erase: clip.erase }
       : target.kind === 'pageBreak'
         ? { start: doc.pageBreaks[target.index].t }
-        : { start: doc.audio[target.index]?.start || 0 };
+        : target.kind === 'camera'
+          ? {
+            start: doc.pages.find((p) => p.id === target.pageId)
+              ?.cameraKeyframes[target.index]?.t ?? 0,
+          }
+          : { start: doc.audio[target.index]?.start || 0 };
     dragRef.current = {
       ...target,
       x0: e.clientX,
@@ -307,7 +400,7 @@ export default function Timeline({
       if (!d) return;
       const dt = (e.clientX - d.x0) / pxPerSec;
       const opts = { coalesce: d.tag };
-      const skip = { kind: d.kind, id: d.id, index: d.index };
+      const skip = { kind: d.kind, id: d.id, index: d.index, pageId: d.pageId };
       // Folded into the same patch as the horizontal move so the whole gesture
       // stays one coalesced undo step.
       const trackId = laneUnder(d, e.clientY - d.y0);
@@ -315,6 +408,14 @@ export default function Timeline({
 
       if (d.kind === 'pageBreak') {
         ed.patchPageBreak(d.index, { t: Math.max(0, snap(d.base.start + dt, skip)) }, opts);
+        return;
+      }
+
+      if (d.kind === 'camera') {
+        // Retimes the keyframe only, never its framing -- dragging a diamond
+        // sideways asks "make the push happen later", not "point it elsewhere".
+        ed.patchCameraKeyframe(d.pageId, d.index,
+          { t: Math.max(0, snap(d.base.start + dt, skip)) }, opts);
         return;
       }
 
@@ -458,6 +559,12 @@ export default function Timeline({
                   onClick={() => ed.addPageBreak({ t: time })}>
             <Icon d={PATH.page} /> Page
           </button>
+          <button className="btn quiet"
+                  title="Pin the framing that is live right now, so a later move starts from here"
+                  disabled={!activePageId}
+                  onClick={() => ed.addCameraKeyframe(activePageId, time)}>
+            <Icon d={PATH.plus} /> Camera
+          </button>
           <button className="btn quiet" title="Add an empty video lane"
                   onClick={() => ed.addTrack('clip')}>
             <Icon d={PATH.plus} /> Lane
@@ -486,6 +593,13 @@ export default function Timeline({
               <span className="swatch" style={{ background: 'var(--lane-page)' }} />
               <span className="name">Pages</span>
               <span className="count">{doc.pages.length}</span>
+            </div>
+            <div className="tl-head" data-kind="camera">
+              <span className="swatch" style={{ background: 'var(--lane-camera)' }} />
+              <span className="name">Camera</span>
+              <span className="count">
+                {doc.pages.reduce((n, p) => n + (p.cameraKeyframes?.length || 0), 0)}
+              </span>
             </div>
             {lanes.map(({ track, clips, audio }) => (
               <TrackHead
@@ -521,6 +635,16 @@ export default function Timeline({
                 selection={selection}
                 setSelection={setSelection}
                 onBreakDown={(e, index) => onDrag(e, { kind: 'pageBreak', index, edge: 'move' })}
+              />
+
+              <CameraLane
+                doc={doc}
+                pxPerSec={pxPerSec}
+                selection={selection}
+                setSelection={setSelection}
+                onKeyDown={(e, pageId, index) => onDrag(e, {
+                  kind: 'camera', pageId, index, edge: 'move',
+                })}
               />
 
               {doc.clips.length === 0 && doc.audio.length === 0 && (

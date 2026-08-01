@@ -15,6 +15,7 @@
 import { useCallback, useMemo, useReducer } from 'react';
 
 import { pageAt } from '../../engine/model/project.js';
+import { cameraAt } from '../../engine/render/renderFrame.js';
 
 /**
  * Fields that only move a clip in time, space, between lanes or between pages;
@@ -156,6 +157,75 @@ export function removeClipFrom(doc, id) {
   const assets = { ...doc.assets };
   if (clip && !clips.some((c) => c.assetId === clip.assetId)) delete assets[clip.assetId];
   return { ...doc, clips, assets };
+}
+
+// ── camera ────────────────────────────────────────────────────────────
+
+/**
+ * Two keyframes closer than this are the same moment. One frame at 30fps is
+ * 0.033s, so this is under half a frame -- close enough that no move authored
+ * through the UI can be swallowed, wide enough that float noise in a playhead
+ * time cannot produce two keyframes at what the user sees as one instant.
+ */
+export const CAMERA_EPS = 0.02;
+
+/** How long a camera move takes when the editor picks the timing. */
+export const CAMERA_MOVE_SECONDS = 1.0;
+
+/** Times are seconds in a JSON document; float noise there reads as a bug. */
+const round3 = (t) => Math.round(t * 1000) / 1000;
+
+/**
+ * Frame page `pageId` as `cam` at time `t`.
+ *
+ * The move *arrives* at `t` rather than departing from it, which is the whole
+ * point: the user parks the playhead where a clip starts drawing, frames the
+ * detail they want written, and the camera is already settled when the pen
+ * lands. To get that, a *hold* keyframe is planted `moveDuration` earlier
+ * carrying whatever the framing was at that instant -- without it, a new
+ * keyframe would drag the camera all the way from the previous one, so
+ * framing a shot at 20s would have the camera creeping for the whole video.
+ *
+ * Idempotent by construction, which is what makes it safe to call on every
+ * pointermove of a drag: once a keyframe exists at `t` the first branch
+ * replaces it in place and no second hold is ever planted.
+ */
+export function withCameraAt(doc, pageId, t, cam, { moveDuration = CAMERA_MOVE_SECONDS } = {}) {
+  const at = round3(Math.max(0, t));
+  const value = { x: Math.round(cam.x), y: Math.round(cam.y), zoom: round3(cam.zoom) };
+
+  const pages = doc.pages.map((p) => {
+    if (p.id !== pageId) return p;
+    // A timeline drag leaves the list unsorted on purpose (see
+    // patchCameraKeyframe), so sort before reasoning about neighbours.
+    const kfs = [...(p.cameraKeyframes || [])].sort((a, b) => a.t - b.t);
+
+    const hit = kfs.findIndex((k) => Math.abs(k.t - at) < CAMERA_EPS);
+    if (hit >= 0) {
+      kfs[hit] = { ...kfs[hit], ...value };
+      return { ...p, cameraKeyframes: kfs };
+    }
+
+    const prev = [...kfs].reverse().find((k) => k.t < at - CAMERA_EPS);
+    if (prev && moveDuration > 0) {
+      const holdT = round3(Math.max(prev.t + CAMERA_EPS, at - moveDuration));
+      // Skip when the gap is too small to hold anything: prev is then already
+      // acting as the hold, and a second keyframe on top of it buys nothing.
+      // The upper bound matters too -- a hold at `at` itself would be a
+      // duplicate of the keyframe pushed below, at the same instant.
+      if (holdT > prev.t + CAMERA_EPS && holdT < at - CAMERA_EPS) {
+        // Spread field by field, not `...cameraAt(...)`: past the last
+        // keyframe cameraAt hands back that keyframe itself, `t` and all, and
+        // spreading it would silently move the hold to the wrong time.
+        const held = cameraAt({ cameraKeyframes: kfs }, holdT);
+        kfs.push({ t: holdT, x: held.x, y: held.y, zoom: held.zoom });
+      }
+    }
+    kfs.push({ t: at, ...value });
+    return { ...p, cameraKeyframes: kfs.sort((a, b) => a.t - b.t) };
+  });
+
+  return { ...doc, pages };
 }
 
 /** True when a clip patch changes geometry and needs a main-process rebuild. */
@@ -431,6 +501,62 @@ export function useEditor() {
       edit((doc) => ({
         ...doc,
         pageBreaks: doc.pageBreaks.filter((_, i) => i !== index),
+      }));
+    },
+
+    // ── camera ────────────────────────────────────────────────────────
+    // Also layout-class. A camera move changes what the frame shows, never
+    // what any drawable's compiled geometry is, so none of these re-prepare --
+    // which is what lets a pan drag repaint the stage continuously.
+
+    /** Frame `pageId` as `cam` at `t`. See withCameraAt for the hold rule. */
+    setCameraAt(pageId, t, cam, opts = {}) {
+      const { moveDuration, ...editOpts } = opts;
+      edit((doc) => withCameraAt(doc, pageId, t, cam, { moveDuration }), editOpts);
+    },
+
+    /** Snapshot the framing already in effect at `t` as a keyframe of its own. */
+    addCameraKeyframe(pageId, t) {
+      edit((doc) => {
+        const page = doc.pages.find((p) => p.id === pageId);
+        if (!page) return doc;
+        return withCameraAt(doc, pageId, t, cameraAt(page, t), { moveDuration: 0 });
+      });
+    },
+
+    /**
+     * Patch one keyframe by index.
+     *
+     * Deliberately does *not* re-sort, exactly as patchPageBreak does not: a
+     * timeline drag holds an index, and re-sorting under it mid-gesture would
+     * hand the drag a different keyframe the moment one passed another.
+     * normalizeProject sorts on the way to the renderer, so the document still
+     * renders correctly while it is momentarily out of order.
+     */
+    patchCameraKeyframe(pageId, index, patch, opts = {}) {
+      edit((doc) => ({
+        ...doc,
+        pages: doc.pages.map((p) => (p.id === pageId
+          ? {
+            ...p,
+            cameraKeyframes: p.cameraKeyframes.map((k, i) => (i === index ? { ...k, ...patch } : k)),
+          }
+          : p)),
+      }), opts);
+    },
+
+    /**
+     * Drop a keyframe. Unguarded even for the last one: normalizeProject fills
+     * an empty list back in with the identity camera, so "remove every
+     * keyframe" means "no camera moves", which is a reasonable thing to ask
+     * for and not a broken document.
+     */
+    removeCameraKeyframe(pageId, index) {
+      edit((doc) => ({
+        ...doc,
+        pages: doc.pages.map((p) => (p.id === pageId
+          ? { ...p, cameraKeyframes: p.cameraKeyframes.filter((_, i) => i !== index) }
+          : p)),
       }));
     },
 

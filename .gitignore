@@ -7,3 +7,4 @@ __pycache__/
 out*.mp4
 demo.mp4
 text.mp4
+dist/

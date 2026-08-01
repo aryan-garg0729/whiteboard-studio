@@ -54,7 +54,16 @@ function pickStyleForTool(session, preferredId, tool) {
 /** Ease used for every interpolated motion, so camera and paper agree. */
 const smoothstep = (u) => u * u * (3 - 2 * u);
 
-/** Camera state at time t, interpolated from the page's keyframes. */
+/**
+ * Camera state at time t, interpolated from the page's keyframes.
+ *
+ * `x`/`y` interpolate linearly but `zoom` interpolates *geometrically*. Zoom is
+ * a ratio, not a distance: lerping 1 -> 4 spends the first half of the move
+ * covering 1x-2.5x and the second half covering 2.5x-4x, which on screen reads
+ * as a zoom that lurches and then crawls. Stepping by a constant *factor*
+ * instead makes the apparent rate constant, which is what "smooth zoom" means.
+ * Endpoints are unchanged, so seeking to a keyframe is still exact.
+ */
 export function cameraAt(page, t) {
   const kfs = page?.cameraKeyframes;
   if (!kfs || !kfs.length) return { x: 0, y: 0, zoom: 1 };
@@ -71,7 +80,9 @@ export function cameraAt(page, t) {
   return {
     x: a.x + (b.x - a.x) * u,
     y: a.y + (b.y - a.y) * u,
-    zoom: a.zoom + (b.zoom - a.zoom) * u,
+    // Safe as a ratio: the validator clamps zoom to [0.01, 100], so it is
+    // always finite and strictly positive.
+    zoom: a.zoom * ((b.zoom / a.zoom) ** u),
   };
 }
 

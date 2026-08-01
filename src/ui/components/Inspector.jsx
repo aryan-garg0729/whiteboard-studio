@@ -1,6 +1,14 @@
 import React from 'react';
-import { pageWindows } from '../../engine/model/project.js';
+import { pageAt, pageWindows } from '../../engine/model/project.js';
+import { cameraAt } from '../../engine/render/renderFrame.js';
+import { localToWorld } from '../stageGeom.js';
 import { Field, Group, Icon, Num, PATH, Soon } from './common.jsx';
+
+/**
+ * Breathing room left around a clip by "Zoom to selection", as a multiple of
+ * its bounding box. Framing artwork edge to edge looks like a crop, not a shot.
+ */
+const FRAME_MARGIN = 1.24;
 
 const ANIMATIONS = [
   ['draw.outlineFill', 'Outline, then colour'],
@@ -28,7 +36,7 @@ function TrackField({ tracks, kind, value, onChange }) {
   );
 }
 
-function ClipInspector({ ed, clip, asset }) {
+function ClipInspector({ ed, clip, asset, frame, fps, selection, bboxes }) {
   const t = clip.transform || {};
   const erase = clip.erase;
   const drawEnd = clip.start + clip.duration;
@@ -147,6 +155,11 @@ function ClipInspector({ ed, clip, asset }) {
             )}
         </Group>
       )}
+
+      {/* Repeated here rather than left to the project panel: "zoom to this"
+          only means anything once something is selected, and selecting is
+          exactly what swaps the project panel out. */}
+      <CameraGroup ed={ed} frame={frame} fps={fps} selection={selection} bboxes={bboxes} />
     </>
   );
 }
@@ -216,6 +229,104 @@ function PageBreakInspector({ ed, index, brk }) {
   );
 }
 
+/** One camera keyframe: a framing, and the moment the camera is to hold it. */
+function CameraInspector({ ed, pageId, index }) {
+  const page = ed.doc.pages.find((p) => p.id === pageId);
+  const k = page?.cameraKeyframes?.[index];
+  if (!k) return null;
+  const patch = (p) => ed.patchCameraKeyframe(pageId, index, p);
+  return (
+    <Group title="Camera keyframe" right={<span className="pill">{page.name}</span>}>
+      <div className="pair">
+        <Field label="At"><Num value={k.t} step={0.1} min={0}
+          onChange={(t) => patch({ t })} /></Field>
+        <Field label="Zoom"><Num value={k.zoom} step={0.1} min={0.01} max={100}
+          onChange={(zoom) => patch({ zoom })} /></Field>
+      </div>
+      <div className="pair">
+        <Field label="X"><Num value={k.x} step={10} onChange={(x) => patch({ x })} /></Field>
+        <Field label="Y"><Num value={k.y} step={10} onChange={(y) => patch({ y })} /></Field>
+      </div>
+      <div className="hint">
+        X and Y are the world point the frame centres on, so a zoom of 2 shows
+        half as much of the page around it. The move into this framing eases
+        from the keyframe before it — put one just ahead to hold the previous
+        shot until then.
+      </div>
+      <button className="btn danger wide"
+              onClick={() => ed.removeCameraKeyframe(pageId, index)}>
+        <Icon d={PATH.trash} /> Remove keyframe
+      </button>
+    </Group>
+  );
+}
+
+/**
+ * Project-level camera controls.
+ *
+ * "Zoom to selection" is the whole feature in one button: park the playhead
+ * where a clip begins, pick the artwork you want written large, and the camera
+ * arrives on it just in time.
+ */
+function CameraGroup({ ed, frame, fps, selection, bboxes }) {
+  const doc = ed.doc;
+  const t = frame / fps;
+  const pageId = pageAt(doc, t);
+  const page = doc.pages.find((p) => p.id === pageId);
+  const cam = cameraAt(page, t);
+
+  const clip = selection?.type === 'clip'
+    ? doc.clips.find((c) => c.id === selection.id)
+    : null;
+  const bbox = clip && bboxes?.get(clip.id);
+  // Only artwork on the page being shown can be framed: the keyframe would go
+  // on this page, and pointing it at a drawable on another sheet frames blank
+  // paper.
+  const framable = bbox && clip.pageId === pageId;
+
+  const frameClip = () => {
+    const tr = clip.transform || { x: 0, y: 0, scale: 1 };
+    const a = localToWorld(tr, bbox[0], bbox[1]);
+    const b = localToWorld(tr, bbox[2], bbox[3]);
+    const w = Math.abs(b.x - a.x) * FRAME_MARGIN;
+    const h = Math.abs(b.y - a.y) * FRAME_MARGIN;
+    // renderPage maps world to canvas as `size/2 + (world - cam) * zoom`, so a
+    // world span of `w` covers `w * zoom` pixels. Fit whichever axis is tighter.
+    const zoom = Math.min(100, Math.max(0.01,
+      Math.min(doc.meta.width / Math.max(1, w), doc.meta.height / Math.max(1, h))));
+    ed.setCameraAt(pageId, t, { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, zoom });
+  };
+
+  return (
+    <Group title="Camera" right={<span className="pill">{cam.zoom}×</span>}>
+      <div className="hint">
+        The page moves under the camera; the hand keeps its size on screen, so
+        writing looks the same however far in you are.
+      </div>
+      <button className="btn wide" disabled={!framable} onClick={frameClip}
+              title={framable
+                ? 'Frame the selected clip at the playhead, easing in over the second before it'
+                : 'Select a clip on the page currently showing'}>
+        <Icon d={PATH.plus} /> Zoom to selection
+      </button>
+      <button className="btn wide" disabled={!page}
+              title="Pin the framing that is live right now, so a later move starts from here"
+              onClick={() => ed.addCameraKeyframe(pageId, t)}>
+        <Icon d={PATH.plus} /> Hold this framing
+      </button>
+      <button className="btn wide" disabled={cam.zoom === 1 && cam.x === 0 && cam.y === 0}
+              title="Ease back out to the whole page at the playhead"
+              onClick={() => ed.setCameraAt(pageId, t, { x: 0, y: 0, zoom: 1 })}>
+        Back to full page
+      </button>
+      <div className="hint">
+        Or press <b>C</b> and drag the stage to pan, scroll to zoom. Keyframes
+        appear on the timeline’s camera lane.
+      </div>
+    </Group>
+  );
+}
+
 /** Pages, and where each one is on screen. */
 function PagesGroup({ ed, frame, fps }) {
   const doc = ed.doc;
@@ -245,7 +356,7 @@ function PagesGroup({ ed, frame, fps }) {
   );
 }
 
-function ProjectInspector({ ed, hands, frame, fps }) {
+function ProjectInspector({ ed, hands, frame, fps, selection, bboxes }) {
   const m = ed.doc.meta;
   return (
     <>
@@ -273,41 +384,41 @@ function ProjectInspector({ ed, hands, frame, fps }) {
         </Field>
       </Group>
 
-      <Group title={<>Camera <Soon /></>}>
-        <div className="hint">
-          The canvas is unbounded and the camera is already a keyframed
-          {' '}<code>{'{x, y, zoom}'}</code> track in the document — the editor
-          just has no way to author keyframes yet.
-        </div>
-        <button className="btn wide" disabled>Add camera keyframe</button>
-      </Group>
+      <CameraGroup ed={ed} frame={frame} fps={fps} selection={selection}
+                   bboxes={bboxes} />
 
       <PagesGroup ed={ed} frame={frame} fps={fps} />
     </>
   );
 }
 
-export default function Inspector({ ed, selection, hands, frame, fps }) {
+export default function Inspector({ ed, selection, hands, frame, fps, bboxes }) {
   const clip = selection?.type === 'clip'
     ? ed.doc.clips.find((c) => c.id === selection.id)
     : null;
   const track = selection?.type === 'audio' ? ed.doc.audio[selection.index] : null;
   const brk = selection?.type === 'pageBreak' ? ed.doc.pageBreaks[selection.index] : null;
+  const key = selection?.type === 'camera' ? selection : null;
 
   return (
     <aside className="panel">
       <div className="panel-head">
         <span className="panel-title">
-          {clip ? 'Clip' : track ? 'Audio' : brk ? 'Page break' : 'Project'}
+          {clip ? 'Clip' : track ? 'Audio' : brk ? 'Page break'
+            : key ? 'Camera' : 'Project'}
         </span>
       </div>
       <div className="panel-body">
         <div className="insp">
-          {clip && <ClipInspector ed={ed} clip={clip} asset={ed.doc.assets[clip.assetId]} />}
+          {clip && <ClipInspector ed={ed} clip={clip} asset={ed.doc.assets[clip.assetId]}
+                                  frame={frame} fps={fps} selection={selection}
+                                  bboxes={bboxes} />}
           {track && <AudioInspector ed={ed} index={selection.index} track={track} />}
           {brk && <PageBreakInspector ed={ed} index={selection.index} brk={brk} />}
-          {!clip && !track && !brk
-            && <ProjectInspector ed={ed} hands={hands} frame={frame} fps={fps} />}
+          {key && <CameraInspector ed={ed} pageId={key.pageId} index={key.index} />}
+          {!clip && !track && !brk && !key
+            && <ProjectInspector ed={ed} hands={hands} frame={frame} fps={fps}
+                                 selection={selection} bboxes={bboxes} />}
         </div>
       </div>
     </aside>

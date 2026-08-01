@@ -388,6 +388,12 @@ export function projectDuration(project, tail = 0.6) {
   // A break after the last clip must still get to finish: without this a swipe
   // onto a closing page is cut off partway across the frame.
   for (const b of project.pageBreaks || []) end = Math.max(end, b.t + b.duration);
+  // Same for a camera move authored past the last stroke -- a slow pull-out
+  // over the finished drawing is a perfectly ordinary way to end a video, and
+  // without this the timeline stops before it arrives.
+  for (const p of project.pages || []) {
+    for (const k of p.cameraKeyframes || []) end = Math.max(end, k.t);
+  }
   return end > 0 ? end + tail : 0;
 }
 

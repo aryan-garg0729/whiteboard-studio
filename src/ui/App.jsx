@@ -46,6 +46,11 @@ export default function App() {
   const [error, setError] = useState(null);
   const [zoom, setZoom] = useState('fit');
   const [guides, setGuides] = useState(false);
+  // Which gesture the stage answers to. 'select' moves and resizes clips;
+  // 'camera' pans and zooms the document camera instead. A mode rather than a
+  // modifier because framing a shot is a sustained activity -- you nudge, play
+  // back, nudge again -- and holding a key through all of that is miserable.
+  const [tool, setTool] = useState('select');
   const [tlHeight, setTlHeight] = useState(232);
   const [dropping, setDropping] = useState(false);
   // Clip bounds must live in state, not on sessionRef: the selection overlay
@@ -305,6 +310,10 @@ export default function App() {
     if (selection?.type === 'clip') { ed.removeClip(selection.id); setSelection(null); }
     if (selection?.type === 'audio') { ed.removeAudio(selection.index); setSelection(null); }
     if (selection?.type === 'pageBreak') { ed.removePageBreak(selection.index); setSelection(null); }
+    if (selection?.type === 'camera') {
+      ed.removeCameraKeyframe(selection.pageId, selection.index);
+      setSelection(null);
+    }
   }, [ed, selection]);
 
   // ── shortcuts ─────────────────────────────────────────────────────
@@ -325,6 +334,7 @@ export default function App() {
       else if (e.code === 'End') setFrame(Math.max(0, frames - 1));
       else if (key === 'h') ed.patchMeta({ showHand: !showHand });
       else if (key === 'g') setGuides((g) => !g);
+      else if (key === 'c') setTool((t) => (t === 'camera' ? 'select' : 'camera'));
       else if (e.key === 'Delete' || e.key === 'Backspace') deleteSelected();
     };
     window.addEventListener('keydown', onKey);
@@ -520,6 +530,12 @@ export default function App() {
           setVolume={setVolume}
           ed={ed}
           cam={camera}
+          tool={tool}
+          setTool={setTool}
+          // Camera keyframes belong to a page, and mid-swipe there are two on
+          // screen and no single one to attach a framing to.
+          canCamera={pageState.u >= 1 && !!livePage}
+          time={frame / meta.fps}
           pageId={livePage?.id}
           pageName={livePage?.name}
           pageCount={live?.pages?.length || 1}
@@ -530,7 +546,7 @@ export default function App() {
         />
 
         <Inspector ed={ed} selection={selection} hands={hands}
-                   frame={frame} fps={meta.fps} />
+                   frame={frame} fps={meta.fps} bboxes={bboxes} />
       </div>
 
       <Timeline
