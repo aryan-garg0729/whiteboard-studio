@@ -32,7 +32,7 @@ const HISTORY_LIMIT = 100;
 
 export const EMPTY_PROJECT = {
   meta: {
-    version: 1, fps: 30, width: 1920, height: 1080,
+    version: 1, name: '', fps: 30, width: 1920, height: 1080,
     background: '#fdfdfb', handStyleId: 'hand1', showHand: true,
   },
   assets: {},
@@ -116,11 +116,20 @@ export function afterTransition(doc, t) {
   return t;
 }
 
-/** Append an asset plus a clip for it, starting after everything else ends. */
-export function addClipTo(doc, asset, { animId, duration = 3, transform } = {}) {
+/**
+ * Append an asset plus a clip for it, starting after everything else ends.
+ *
+ * `clipId` may be supplied by the caller. That is not a convenience: the
+ * editor cannot know a drawable's size until the sidecar has traced it, so
+ * placing a clip in the centre of frame takes two steps, and the caller needs
+ * a handle on the clip to finish the job when the geometry arrives. Picking
+ * the id up front is the only way to get one out of a dispatch-based action.
+ */
+export function addClipTo(doc, asset, { animId, duration = 3, transform, clipId: wanted } = {}) {
   const assetId = uniqueId(asset.kind === 'text' ? 'text' : 'art',
     new Set(Object.keys(doc.assets)));
-  const clipId = uniqueId('clip', new Set(doc.clips.map((c) => c.id)));
+  const taken = new Set(doc.clips.map((c) => c.id));
+  const clipId = wanted && !taken.has(wanted) ? wanted : uniqueId('clip', taken);
   const raw = doc.clips.reduce((end, c) => Math.max(end, clipEnd(c)), 0);
   // Never begin inside a transition: the validator forbids drawing while the
   // paper is sliding, so a clip appended right after a page break has to wait
@@ -262,13 +271,22 @@ export function reducer(state, action) {
       if (doc === state.doc) return state;
       // A timeline drag emits an edit per pointermove. Coalescing by tag keeps
       // the preview live while collapsing the whole gesture into one undo step.
-      const merge = action.coalesce && action.coalesce === state.tag;
+      //
+      // `replace` is the same idea for a follow-up the user never asked for:
+      // it amends the document in place without a history entry. Placing a clip
+      // uses it -- the centring pass runs once the traced geometry arrives, and
+      // without this an undo would leave the clip on the page and merely move
+      // it, which reads as a bug rather than as an undo.
+      const merge = action.replace || (action.coalesce && action.coalesce === state.tag);
       return {
         ...state,
         doc,
         past: merge ? state.past : [...state.past, state.doc].slice(-HISTORY_LIMIT),
         future: [],
-        tag: action.coalesce || null,
+        // A replace is an amendment, not a gesture, and may land while one is
+        // running -- clearing the tag would break the coalescing of whatever
+        // drag is in flight.
+        tag: action.replace ? state.tag : (action.coalesce || null),
         rev: state.rev + 1,
         structuralRev: state.structuralRev + (action.structural ? 1 : 0),
         dirty: true,
@@ -329,8 +347,8 @@ export function useEditor() {
     dirty: false,
   });
 
-  const edit = useCallback((fn, { structural = false, coalesce = null } = {}) => {
-    dispatch({ type: 'edit', fn, structural, coalesce });
+  const edit = useCallback((fn, { structural = false, coalesce = null, replace = false } = {}) => {
+    dispatch({ type: 'edit', fn, structural, coalesce, replace });
   }, []);
 
   const actions = useMemo(() => ({
@@ -350,13 +368,13 @@ export function useEditor() {
       }), { structural: isStructural(patch), ...opts });
     },
 
-    patchTransform(id, patch) {
+    patchTransform(id, patch, opts = {}) {
       edit((doc) => ({
         ...doc,
         clips: doc.clips.map((c) => (c.id === id
           ? { ...c, transform: { ...c.transform, ...patch } }
           : c)),
-      }));
+      }), opts);
     },
 
     patchAsset(id, patch) {

@@ -581,7 +581,9 @@ export default function Timeline({
           <span style={{ color: 'var(--text-faint)' }}>Zoom</span>
           <input
             type="range" min={16} max={320} step={4} value={pxPerSec}
-            style={{ width: 110 }}
+            // --fill draws the track's filled portion; CSS cannot read a
+            // range's value on its own.
+            style={{ width: 110, '--fill': `${((pxPerSec - 16) / (320 - 16)) * 100}%` }}
             onChange={(e) => setPxPerSec(Number(e.target.value))}
           />
         </div>

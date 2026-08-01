@@ -161,6 +161,7 @@ export default function Stage({
           </button>
           <input type="range" min={0} max={1} step={0.02}
                  value={muted ? 0 : volume} disabled={!hasAudio}
+                 style={{ '--fill': `${(muted ? 0 : volume) * 100}%` }}
                  onChange={(e) => { setVolume(Number(e.target.value)); setMuted(false); }} />
         </div>
 

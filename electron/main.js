@@ -10,7 +10,7 @@
  * never round-trip -- they are pure `renderFrame` inputs.
  */
 
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from 'electron';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
@@ -34,6 +34,107 @@ if (process.env.WB_SMOKE) app.commandLine.appendSwitch('force-device-scale-facto
 
 let sidecar = null;
 const getSidecar = () => (sidecar ??= new Sidecar({ root: ROOT, cacheDir: join(ROOT, '.cache') }));
+
+/** Shipped sample projects. Read by both the File menu and `project:examples`. */
+const EXAMPLES = [
+  join(ROOT, 'examples', 'demo.project.json'),
+  join(ROOT, 'examples', 'svg.project.json'),
+  join(ROOT, 'examples', 'pages.project.json'),
+];
+
+/**
+ * The application menu.
+ *
+ * Installing one is not decoration. Electron fits a default menu when the app
+ * never sets its own, and that default fights the editor: its Edit roles claim
+ * Ctrl+Z / Ctrl+Shift+Z and run the *DOM* undo instead of the document's, and
+ * Ctrl+R reloads the window, silently discarding unsaved work. It also duplicated
+ * the app's own in-page menu bar, so every command appeared twice on screen.
+ *
+ * Items are never disabled here. Doing that would mean streaming editor state
+ * (can-undo, has-clips, selection) into main and rebuilding the menu on every
+ * keystroke; instead the renderer simply ignores a command that does not apply,
+ * which it already does -- `ed.redo` with nothing to redo returns the same state.
+ */
+function buildMenu() {
+  const send = (id) => () => {
+    const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
+    win?.webContents.send('menu:command', id);
+  };
+  const item = (label, id, accelerator) => ({ label, accelerator, click: send(id) });
+
+  /**
+   * A menu item that *shows* its key without claiming it.
+   *
+   * A registered accelerator is global: it fires ahead of the web page even
+   * while a text field has focus, so registering `H` would make it impossible
+   * to type the letter h anywhere in the app, and `Delete` would remove the
+   * selected clip instead of a character. The renderer's own key handler
+   * already deals with these, and it can see what has focus -- text inputs
+   * stop the event before it reaches the window listener.
+   */
+  const hint = (label, id, accelerator) =>
+    ({ label, accelerator, registerAccelerator: false, click: send(id) });
+
+  Menu.setApplicationMenu(Menu.buildFromTemplate([
+    {
+      label: 'File',
+      submenu: [
+        item('New project', 'new', 'CmdOrCtrl+N'),
+        item('Open…', 'open', 'CmdOrCtrl+O'),
+        {
+          label: 'Open example',
+          submenu: EXAMPLES.map((p) => ({
+            label: p.split('/').pop().replace('.project.json', ''),
+            click: send(`open:${p}`),
+          })),
+        },
+        { type: 'separator' },
+        item('Save', 'save', 'CmdOrCtrl+S'),
+        item('Save as…', 'saveAs', 'CmdOrCtrl+Shift+S'),
+        { type: 'separator' },
+        item('Export MP4…', 'export', 'CmdOrCtrl+E'),
+        { type: 'separator' },
+        { role: 'quit' },
+      ],
+    },
+    {
+      label: 'Edit',
+      submenu: [
+        item('Undo', 'undo', 'CmdOrCtrl+Z'),
+        // Ctrl+Y, as asked for. A menu item carries one accelerator, so the
+        // conventional Ctrl+Shift+Z stays alive as an alias in the renderer's
+        // own key handler.
+        item('Redo', 'redo', 'CmdOrCtrl+Y'),
+        { type: 'separator' },
+        item('Rename project…', 'rename', 'F2'),
+        hint('Delete selected', 'delete', 'Delete'),
+      ],
+    },
+    {
+      label: 'Insert',
+      submenu: [
+        item('Image or SVG…', 'insert:image'),
+        item('Text', 'insert:text'),
+        item('Audio track…', 'insert:audio'),
+        { type: 'separator' },
+        item('Page break', 'insert:page'),
+        item('Camera keyframe', 'insert:camera'),
+      ],
+    },
+    {
+      label: 'View',
+      submenu: [
+        hint('Toggle hand', 'view:hand', 'H'),
+        hint('Toggle guides', 'view:guides', 'G'),
+        hint('Camera tool', 'view:camera', 'C'),
+        { type: 'separator' },
+        { role: 'togglefullscreen' },
+        { role: 'toggleDevTools' },
+      ],
+    },
+  ]));
+}
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -137,11 +238,7 @@ ipcMain.handle('project:save', async (_e, { project, path, saveAs }) => {
   }
 });
 
-ipcMain.handle('project:examples', () => [
-  join(ROOT, 'examples', 'demo.project.json'),
-  join(ROOT, 'examples', 'svg.project.json'),
-  join(ROOT, 'examples', 'pages.project.json'),
-]);
+ipcMain.handle('project:examples', () => EXAMPLES);
 
 ipcMain.handle('asset:import', async (_e, kind) => {
   const filters = kind === 'audio'
@@ -346,6 +443,7 @@ async function runSmoke(win, outPath) {
 }
 
 app.whenReady().then(() => {
+  buildMenu();
   const win = createWindow();
   if (process.env.WB_SMOKE) runSmoke(win, process.env.WB_SMOKE);
   app.on('activate', () => {

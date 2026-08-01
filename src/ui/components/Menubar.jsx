@@ -1,102 +1,95 @@
+/**
+ * The app's own top row.
+ *
+ * It used to carry a full File/Edit/Insert/View menu bar, which was drawn
+ * directly beneath the operating system's own menu bar showing the same
+ * commands -- the app never installed an application menu, so Electron fitted
+ * its default one. Those menus now live where they belong, in the real menu bar
+ * (see `buildMenu` in electron/main.js), and this row keeps only what a menu
+ * cannot do: identity, the project name, and the one action worth a permanent
+ * button.
+ */
+
 import React, { useEffect, useRef, useState } from 'react';
 import { Icon, PATH } from './common.jsx';
 
-function Menu({ label, open, setOpen, children }) {
+/**
+ * What to call this project.
+ *
+ * `meta.name` is the authored title and wins. Failing that the filename stands
+ * in, minus the `.project.json` suffix -- the suffix is noise in a title bar,
+ * and every project has it.
+ */
+export function projectTitle(doc, path) {
+  const named = doc.meta?.name?.trim();
+  if (named) return named;
+  if (path) return path.split('/').pop().replace(/\.project\.json$/, '');
+  return 'Untitled';
+}
+
+/** Click (or Edit -> Rename project) to retitle; Enter commits, Escape cancels. */
+function Title({ ed, path, editing, setEditing }) {
+  const title = projectTitle(ed.doc, path);
+  const inputRef = useRef(null);
+
+  // Selecting the text as well as focusing it: renaming almost always means
+  // replacing the name outright, not appending to "Untitled".
+  useEffect(() => { if (editing) inputRef.current?.select(); }, [editing]);
+
+  if (editing) {
+    return (
+      <input
+        ref={inputRef}
+        className="doc-rename"
+        autoFocus
+        defaultValue={title}
+        // The transport listens for Space on window; without this, typing a
+        // space in the title would start playback instead.
+        onKeyDown={(e) => {
+          e.stopPropagation();
+          if (e.key === 'Enter') e.currentTarget.blur();
+          if (e.key === 'Escape') setEditing(false);
+        }}
+        onBlur={(e) => {
+          const name = e.target.value.trim();
+          if (name && name !== title) ed.patchMeta({ name });
+          setEditing(false);
+        }}
+      />
+    );
+  }
+
   return (
-    <div className={open ? 'menu open' : 'menu'}>
-      <button
-        onMouseDown={(e) => { e.preventDefault(); setOpen(open ? null : label); }}
-        // Hovering another title while a menu is open switches to it, which is
-        // what every desktop menubar does.
-        onMouseEnter={() => setOpen((cur) => (cur ? label : cur))}
-      >
-        {label}
-      </button>
-      {open && <div className="menu-pop">{children}</div>}
-    </div>
+    <button className="doc-name" onClick={() => setEditing(true)}
+            title="Rename this project (F2)">
+      <b>{title}</b>
+      {ed.dirty && <span className="dot" title="Unsaved changes"> ●</span>}
+    </button>
   );
 }
 
-const Item = ({ children, onClick, keys, disabled }) => (
-  <button disabled={disabled} onClick={onClick}>
-    {children}{keys && <span className="key">{keys}</span>}
-  </button>
-);
-
-export default function Menubar({ ed, cmd, busy }) {
-  const [open, setOpen] = useState(null);
-  const ref = useRef(null);
-
-  useEffect(() => {
-    if (!open) return undefined;
-    const close = (e) => { if (!ref.current?.contains(e.target)) setOpen(null); };
-    window.addEventListener('mousedown', close);
-    return () => window.removeEventListener('mousedown', close);
-  }, [open]);
-
-  const run = (fn) => () => { setOpen(null); fn(); };
+export default function Menubar({ ed, cmd, busy, renaming, setRenaming }) {
   const has = ed.doc.clips.length > 0;
+  const title = projectTitle(ed.doc, ed.path);
+
+  // Keep the OS window title in step, so the taskbar and window switcher name
+  // the project rather than the application.
+  useEffect(() => {
+    document.title = `${title}${ed.dirty ? ' •' : ''} — Whiteboard Studio`;
+  }, [title, ed.dirty]);
 
   return (
-    <div className="menubar" ref={ref}>
+    <div className="menubar">
       <div className="brand"><span className="mark">W</span>Whiteboard Studio</div>
 
-      <Menu label="File" open={open === 'File'} setOpen={setOpen}>
-        <Item onClick={run(cmd.newProject)} keys="Ctrl N">New project</Item>
-        <Item onClick={run(() => cmd.open())} keys="Ctrl O">Open…</Item>
-        <div className="menu-sep" />
-        {cmd.examples.map((p) => (
-          <Item key={p} onClick={run(() => cmd.open(p))}>
-            Example: {p.split('/').pop().replace('.project.json', '')}
-          </Item>
-        ))}
-        <div className="menu-sep" />
-        <Item onClick={run(() => cmd.save(false))} keys="Ctrl S" disabled={!has}>Save</Item>
-        <Item onClick={run(() => cmd.save(true))} keys="Ctrl ⇧ S" disabled={!has}>Save as…</Item>
-        <div className="menu-sep" />
-        <Item onClick={run(cmd.exportVideo)} keys="Ctrl E" disabled={!has || busy}>
-          Export MP4…
-        </Item>
-      </Menu>
-
-      <Menu label="Edit" open={open === 'Edit'} setOpen={setOpen}>
-        <Item onClick={run(ed.undo)} keys="Ctrl Z" disabled={!ed.canUndo}>Undo</Item>
-        <Item onClick={run(ed.redo)} keys="Ctrl ⇧ Z" disabled={!ed.canRedo}>Redo</Item>
-        <div className="menu-sep" />
-        <Item onClick={run(cmd.deleteSelected)} keys="Del" disabled={!cmd.selectedId}>
-          Delete clip
-        </Item>
-      </Menu>
-
-      <Menu label="Insert" open={open === 'Insert'} setOpen={setOpen}>
-        <Item onClick={run(() => cmd.importAssets('image'))}>Image or SVG…</Item>
-        <Item onClick={run(cmd.addText)}>Text</Item>
-        <Item onClick={run(() => cmd.importAssets('audio'))}>Audio track…</Item>
-        <div className="menu-sep" />
-        <Item onClick={run(cmd.addPage)}>Page break</Item>
-        <Item disabled>Camera keyframe <span className="key">soon</span></Item>
-      </Menu>
-
-      <Menu label="View" open={open === 'View'} setOpen={setOpen}>
-        <Item onClick={run(cmd.toggleHand)} keys="H">
-          {cmd.showHand ? 'Hide hand' : 'Show hand'}
-        </Item>
-        <Item onClick={run(cmd.toggleGuides)} keys="G">
-          {cmd.guides ? 'Hide guides' : 'Show guides'}
-        </Item>
-      </Menu>
-
-      <div className="doc-name">
-        <b>{ed.path ? ed.path.split('/').pop() : 'Untitled'}</b>
-        {ed.dirty && <span className="dot" title="Unsaved changes"> ●</span>}
-      </div>
+      <Title ed={ed} path={ed.path} editing={renaming} setEditing={setRenaming} />
 
       <div className="spacer" />
       <button className="btn quiet icon" title="Undo (Ctrl Z)"
               disabled={!ed.canUndo} onClick={ed.undo}>
         <Icon d={PATH.undo} />
       </button>
-      <button className="btn quiet icon" title="Redo (Ctrl Shift Z)"
+      <button className="btn quiet icon" title="Redo (Ctrl Y)"
               disabled={!ed.canRedo} onClick={ed.redo}>
         <Icon d={PATH.redo} />
       </button>

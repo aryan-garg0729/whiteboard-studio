@@ -132,33 +132,22 @@ body {
   font-size: 9px; color: #fff;
 }
 
-.menu { position: relative; }
-.menu > button {
-  background: none; border: 0; color: var(--text);
-  font: inherit; padding: 4px 9px; border-radius: var(--r); cursor: default;
+/* The in-app File/Edit/Insert/View menus are gone -- they are the real
+   application menu now (electron/main.js). What is left is the project title,
+   which is a button because clicking it renames the project. */
+.doc-name {
+  background: none; border: 0; color: var(--text-dim);
+  font: inherit; margin-left: 12px; padding: 3px 7px;
+  border-radius: var(--r); cursor: text;
 }
-.menu > button:hover, .menu.open > button { background: var(--bg-hover); }
-
-.menu-pop {
-  position: absolute; top: 100%; left: 0; z-index: 60;
-  min-width: 212px; padding: 4px;
-  background: #333; border: 1px solid #191919; border-radius: 4px;
-  box-shadow: 0 10px 28px rgba(0,0,0,.55);
-}
-.menu-pop button {
-  display: flex; align-items: center; gap: 10px; width: 100%;
-  background: none; border: 0; color: var(--text); font: inherit;
-  padding: 5px 9px; border-radius: var(--r); text-align: left; cursor: default;
-}
-.menu-pop button:hover:not(:disabled) { background: var(--accent); color: #fff; }
-.menu-pop button:disabled { color: var(--text-faint); }
-.menu-pop button .key { margin-left: auto; color: var(--text-faint); font-size: 10px; }
-.menu-pop button:hover:not(:disabled) .key { color: #cfe0f7; }
-.menu-sep { height: 1px; background: #444; margin: 4px 2px; }
-
-.doc-name { color: var(--text-dim); margin-left: 12px; }
+.doc-name:hover { background: var(--bg-hover); }
 .doc-name b { color: var(--text); font-weight: 500; }
 .doc-name .dot { color: var(--warn); }
+.doc-rename {
+  margin-left: 12px; padding: 2px 6px; min-width: 180px;
+  background: var(--bg-sunken); color: var(--text);
+  border: 1px solid var(--accent); border-radius: var(--r); outline: none;
+}
 
 /* ── controls ──────────────────────────────────────────────────────── */
 
@@ -214,7 +203,46 @@ input[type=color] {
   width: 100%; height: var(--row); padding: 1px; background: var(--bg-input);
   border: 1px solid var(--line-soft); border-radius: var(--r);
 }
-input[type=range] { width: 100%; accent-color: var(--accent); height: 18px; }
+/* Sliders.
+   The native widget only takes `accent-color`, which leaves a chunky track that
+   does not belong next to the rest of the chrome. Track and thumb are drawn by
+   hand instead; the filled portion is a hard-stopped gradient driven by a
+   `--fill` percentage the component sets inline, since CSS cannot read a
+   range's own value. Without `--fill` the track simply reads as empty, so a
+   caller that forgets it degrades to a plain slider rather than breaking. */
+input[type=range] {
+  -webkit-appearance: none; appearance: none;
+  width: 100%; height: 16px; background: none; cursor: pointer;
+}
+input[type=range]::-webkit-slider-runnable-track {
+  height: 4px; border-radius: 2px;
+  background:
+    linear-gradient(to right, var(--accent) 0 var(--fill, 0%),
+                    var(--line-soft) var(--fill, 0%) 100%);
+}
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 11px; height: 11px; margin-top: -3.5px;
+  border-radius: 50%; background: #f2f2f2;
+  border: 1px solid rgba(0,0,0,.45);
+  /* A ring rather than a size change on hover: growing the thumb shifts the
+     apparent centre and makes a fine adjustment jump under the cursor. */
+  box-shadow: 0 1px 3px rgba(0,0,0,.5);
+  transition: box-shadow .12s ease;
+}
+input[type=range]:hover::-webkit-slider-thumb {
+  box-shadow: 0 1px 3px rgba(0,0,0,.5), 0 0 0 4px rgba(20,115,230,.22);
+}
+input[type=range]:active::-webkit-slider-thumb {
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0,0,0,.5), 0 0 0 5px rgba(20,115,230,.34);
+}
+input[type=range]:focus-visible { outline: none; }
+input[type=range]:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 1px 3px rgba(0,0,0,.5), 0 0 0 4px rgba(20,115,230,.45);
+}
+input[type=range]:disabled { cursor: default; }
+input[type=range]:disabled::-webkit-slider-thumb { background: #8a8a8a; box-shadow: none; }
 label.check { display: flex; align-items: center; gap: 6px; cursor: default; }
 label.check input { accent-color: var(--accent); }
 
@@ -244,11 +272,24 @@ label.check input { accent-color: var(--accent); }
 .lib-hint { color: var(--text-faint); padding: 14px 10px; text-align: center; line-height: 1.6; }
 
 .asset-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; padding: 8px; }
+.asset-cell { position: relative; display: flex; }
 .asset-card {
   background: var(--bg-sunken); border: 1px solid var(--line-soft);
   border-radius: var(--r); overflow: hidden; cursor: default; text-align: left;
-  padding: 0;
+  padding: 0; flex: 1; min-width: 0;
 }
+/* Revealed on hover: a permanent ✕ on every tile turns a calm grid into a row
+   of delete buttons, and removing is the rare action here. Kept reachable by
+   keyboard via :focus-within. */
+.asset-x {
+  position: absolute; top: 3px; right: 3px; z-index: 2;
+  width: 16px; height: 16px; display: grid; place-items: center;
+  background: rgba(20,20,20,.78); color: #ddd;
+  border: 1px solid rgba(0,0,0,.5); border-radius: 3px;
+  opacity: 0; transition: opacity .1s ease; cursor: default;
+}
+.asset-cell:hover .asset-x, .asset-cell:focus-within .asset-x { opacity: 1; }
+.asset-x:hover { background: var(--danger); color: #fff; }
 .asset-card:hover { border-color: #5a5a5a; }
 .asset-card .thumb {
   height: 62px; display: grid; place-items: center; background: #fff;

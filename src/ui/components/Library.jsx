@@ -7,7 +7,7 @@ const TABS = [
   ['hand', 'Hand'],
 ];
 
-function MediaTab({ library, onImport, onPlace, onAddAudio }) {
+function MediaTab({ library, onImport, onPlace, onAddAudio, onRemove }) {
   return (
     <>
       <div className="lib-section">
@@ -31,8 +31,11 @@ function MediaTab({ library, onImport, onPlace, onAddAudio }) {
       ) : (
         <div className="asset-grid">
           {library.map((a) => (
+            // The remove control is a sibling of the card, not a child: the
+            // card is itself a button, and a button inside a button is invalid
+            // markup that browsers resolve by dropping one of them.
+            <div className="asset-cell" key={a.path}>
             <button
-              key={a.path}
               className="asset-card"
               title={`${a.path}\nClick to add, or drag onto the canvas to place it`}
               // Artwork can be dragged onto the stage to land at a chosen spot;
@@ -57,6 +60,15 @@ function MediaTab({ library, onImport, onPlace, onAddAudio }) {
                   : ''}
               </div>
             </button>
+            <button
+              className="asset-x"
+              title={'Remove from the library\n'
+                + 'Your file is not deleted, and any clip already using it keeps working'}
+              onClick={(e) => { e.stopPropagation(); onRemove(a.path); }}
+            >
+              <Icon d={PATH.close} size={10} />
+            </button>
+            </div>
           ))}
         </div>
       )}

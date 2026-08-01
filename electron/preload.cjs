@@ -32,5 +32,12 @@ contextBridge.exposeInMainWorld('studio', {
     ipcRenderer.on('export:progress', wrapped);
     return () => ipcRenderer.removeListener('export:progress', wrapped);
   },
+  // Application-menu clicks. Same unsubscribe contract as onExportProgress,
+  // and for the same reason: the wrapper is what was registered, not `fn`.
+  onMenuCommand: (fn) => {
+    const wrapped = (_e, id) => fn(id);
+    ipcRenderer.on('menu:command', wrapped);
+    return () => ipcRenderer.removeListener('menu:command', wrapped);
+  },
   reveal: (path) => ipcRenderer.invoke('shell:reveal', path),
 });

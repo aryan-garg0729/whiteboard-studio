@@ -209,3 +209,50 @@ test('removing a track rehomes its contents rather than dropping them', () => {
   assert.equal(state.doc.clips[0].trackId, 'v1');
   normalizeProject(state.doc);
 });
+
+// ── placement ─────────────────────────────────────────────────────────
+
+test('a caller may name the clip it is adding', () => {
+  // Placement needs a handle on the clip before the action runs, so it can
+  // finish centring it once the traced geometry arrives.
+  const doc = addClipTo(base(), { kind: 'image', src: '/a.png' }, { clipId: 'mine' });
+  assert.equal(doc.clips[0].id, 'mine');
+});
+
+test('a requested clip id already in use is not allowed to collide', () => {
+  let doc = addClipTo(base(), { kind: 'image', src: '/a.png' }, { clipId: 'dup' });
+  doc = addClipTo(doc, { kind: 'image', src: '/b.png' }, { clipId: 'dup' });
+  assert.equal(doc.clips[1].id, 'clip1', 'falls back to a generated id');
+  assert.equal(new Set(doc.clips.map((c) => c.id)).size, 2);
+  normalizeProject(doc);
+});
+
+// ── history ───────────────────────────────────────────────────────────
+
+test('a replace edit amends the document without adding a history entry', () => {
+  let state = start(base());
+  state = edit(state, (d) => ({ ...d, meta: { ...d.meta, name: 'first' } }));
+  const depth = state.past.length;
+
+  state = edit(state, (d) => ({ ...d, meta: { ...d.meta, name: 'amended' } }),
+    { replace: true });
+
+  assert.equal(state.doc.meta.name, 'amended', 'the document does change');
+  assert.equal(state.past.length, depth, 'but no new undo step appears');
+
+  // Undoing once must land before the *first* of the two edits, so that adding
+  // an asset and then centring it is a single Ctrl+Z.
+  const undone = reducer(state, { type: 'undo' });
+  assert.equal(undone.doc.meta.name, '');
+});
+
+test('a replace edit leaves an in-flight gesture coalescing', () => {
+  let state = start(base());
+  state = edit(state, (d) => ({ ...d, meta: { ...d.meta, name: 'a' } }), { coalesce: 'drag' });
+  state = edit(state, (d) => ({ ...d, meta: { ...d.meta, name: 'b' } }), { replace: true });
+  assert.equal(state.tag, 'drag', 'the gesture tag survives the amendment');
+
+  const depth = state.past.length;
+  state = edit(state, (d) => ({ ...d, meta: { ...d.meta, name: 'c' } }), { coalesce: 'drag' });
+  assert.equal(state.past.length, depth, 'the drag still merges after it');
+});

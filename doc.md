@@ -196,7 +196,9 @@ mode (`showHand: false`) draws no sprite at all.
 | Raster vectorization | Line-art/photo classification, k-means in Lab, `RETR_CCOMP` even-odd rings; **thin clusters become centrelines, not contours** |
 | Text handwriting | opentype.js layout + skeletonized centrelines, role-based stroke order |
 | SVG import | Shapes, groups, nested transforms, style/presentation attrs, fill→region, holes |
-| App shell | Electron + React; menubar, library, stage, inspector, timeline |
+| App shell | Electron + React; library, stage, inspector, timeline. Commands live in the **real application menu** (`buildMenu` in `electron/main.js`) and reach the renderer over `menu:command`; the in-app row keeps only the brand, the click-to-rename project title, undo/redo and Export |
+| Project name | `meta.name`, independent of the filename so it survives Save As; falls back to the filename, then "Untitled", and mirrors into the window title |
+| Asset placement | Click-added assets are centred on the **camera's** framing and shrunk to fit if oversized (`placeInFrame`, `src/ui/stageGeom.js`); a stage drop still lands under the cursor |
 | Asset import | File dialog and drag-and-drop (with a byte-copy fallback when a dropped file has no path); ffprobe duration, waveform peaks, thumbnails |
 | Font picker | System enumeration via fontconfig, **filtered to faces opentype.js can parse**, script-like families first |
 | Timeline | Named tracks with clips auto-packed into shared lanes, drag to move (horizontally to retime, vertically to re-lane), edge-resize, snapping, ruler scrub, audio waveforms |
@@ -282,6 +284,21 @@ mode (`showHand: false`) draws no sprite at all.
   without a real filesystem path. That case now reports an error and points at Library →
   Import rather than silently discarding the files.
 - **Backward scrubbing is O(everything)** until snapshots land.
+- **Never register a single-key menu accelerator.** A registered accelerator is global and
+  fires ahead of the web page even while a text field has focus, so `H` would make it
+  impossible to type the letter h and `Delete` would remove the selected clip instead of a
+  character. `buildMenu` shows those keys via `registerAccelerator: false` and leaves the
+  handling to the renderer's own key listener, which text inputs can stop with
+  `e.stopPropagation()`. Ctrl-chords are registered and were therefore **removed** from the
+  renderer handler — keeping both would run every one of them twice.
+- **Placing a clip takes two steps and is one undo.** A drawable's size is unknown until the
+  sidecar traces it, so a click-added clip lands on the camera centre and is centred exactly
+  when `rebuild` produces its bbox. The second step is a `replace` edit (`state/editor.js`),
+  which amends the document without a history entry — otherwise Ctrl+Z after adding an asset
+  would merely nudge it rather than remove it.
+- **The Library is session state with no persistence.** Removing an item forgets it for the
+  session; it never touches the file on disk, and clips already placed carry the path
+  themselves, so they keep rendering.
 - **Framing a shot plants *two* keyframes, and that is the point.** `withCameraAt()` in
   `src/ui/state/editor.js` inserts a hold one second earlier carrying the previous framing,
   so the move *arrives* at the playhead instead of creeping there from the last keyframe —

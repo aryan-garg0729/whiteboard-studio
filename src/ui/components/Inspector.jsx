@@ -178,6 +178,7 @@ function AudioInspector({ ed, index, track }) {
       </div>
       <Field label="Gain">
         <input type="range" min={0} max={2} step={0.05} value={track.gain ?? 1}
+               style={{ '--fill': `${((track.gain ?? 1) / 2) * 100}%` }}
                onChange={(e) => ed.patchAudio(index, { gain: Number(e.target.value) })} />
       </Field>
       <div className="hint">

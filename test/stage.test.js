@@ -10,7 +10,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  MIN_SCALE, clipRect, cornerPoints, hitTest, localToWorld,
+  MIN_SCALE, clipRect, cornerPoints, hitTest, localToWorld, placeInFrame,
   resizeTransform, screenToWorld, worldPerPixel, worldToScreen,
 } from '../src/ui/stageGeom.js';
 import { readFileSync } from 'node:fs';
@@ -234,4 +234,61 @@ test('the arm leaves the frame from every nib position, in every orientation', (
       }
     }
   }
+});
+
+// ── placing a new drawable ────────────────────────────────────────────
+
+const META = { width: 1920, height: 1080 };
+
+/** Where the middle of a placed drawable ends up, in world units. */
+const placedCenter = (bbox, cam, meta = META) => {
+  const tr = placeInFrame(bbox, cam, meta);
+  const a = localToWorld(tr, bbox[0], bbox[1]);
+  const b = localToWorld(tr, bbox[2], bbox[3]);
+  return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+};
+
+test('a placed drawable is centred on the camera, not on the page origin', () => {
+  // The bug: adding an asset after zooming in put it at world (0,0), which is
+  // the middle of frame only while the camera is at the identity.
+  const bbox = [0, 0, 400, 300];
+  for (const cam of [{ x: 0, y: 0, zoom: 1 },
+                     { x: 900, y: -400, zoom: 3 },
+                     { x: -250, y: 610, zoom: 0.5 }]) {
+    const c = placedCenter(bbox, cam);
+    near(c.x, cam.x, 1);
+    near(c.y, cam.y, 1);
+  }
+});
+
+test('centring accounts for a bbox that does not start at the origin', () => {
+  // Text lays out around a baseline, so its bbox routinely has a negative top.
+  const c = placedCenter([-120, -260, 880, 40], { x: 500, y: 500, zoom: 1 });
+  near(c.x, 500, 1);
+  near(c.y, 500, 1);
+});
+
+test('an oversized drawable is shrunk to fit the visible frame', () => {
+  const huge = [0, 0, 6000, 400];
+  const { scale } = placeInFrame(huge, { x: 0, y: 0, zoom: 1 }, META);
+  assert.ok(scale < 1, 'must shrink');
+  assert.ok(6000 * scale <= META.width, 'and must actually fit');
+});
+
+test('zooming in shrinks a new drawable further, because less page is visible', () => {
+  const art = [0, 0, 1600, 900];
+  const wide = placeInFrame(art, { x: 0, y: 0, zoom: 1 }, META).scale;
+  const tight = placeInFrame(art, { x: 0, y: 0, zoom: 4 }, META).scale;
+  assert.ok(tight < wide, 'a zoomed-in frame holds less, so the artwork is smaller');
+  assert.ok(1600 * tight <= META.width / 4, 'and still fits what is on screen');
+});
+
+test('a drawable that already fits is never enlarged', () => {
+  // Scaling a small asset up is an edit the user did not ask for.
+  assert.equal(placeInFrame([0, 0, 80, 60], { x: 0, y: 0, zoom: 1 }, META).scale, 1);
+});
+
+test('a degenerate bbox does not divide by zero', () => {
+  const tr = placeInFrame([10, 10, 10, 10], { x: 0, y: 0, zoom: 1 }, META);
+  assert.ok(Number.isFinite(tr.x) && Number.isFinite(tr.y) && Number.isFinite(tr.scale));
 });

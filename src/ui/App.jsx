@@ -17,7 +17,8 @@ import { normalizeProject, pageStateAt, projectFrames } from '../engine/model/pr
 import { cameraAt } from '../engine/render/renderFrame.js';
 import { buildSession, renderFrame } from './engineHost.js';
 import { useAudioClock } from './audioClock.js';
-import { useEditor, EMPTY_PROJECT } from './state/editor.js';
+import { useEditor, uniqueId, EMPTY_PROJECT } from './state/editor.js';
+import { placeInFrame } from './stageGeom.js';
 
 import Menubar from './components/Menubar.jsx';
 import Library from './components/Library.jsx';
@@ -33,11 +34,35 @@ const DEFAULT_TEXT = {
 /** Rough writing time; a long line should not race by at a fixed duration. */
 const textDuration = (s) => Math.min(12, Math.max(1.6, s.replace(/\s/g, '').length * 0.16));
 
+/**
+ * How much of the visible frame a newly placed drawable may fill before it is
+ * scaled down to fit. Only ever shrinks: an asset larger than the viewport is
+ * as hard to find as one off screen, but blowing a small one up would be an
+ * edit the user never asked for.
+ */
+const PLACE_FILL = 0.8;
+
 export default function App() {
   const ed = useEditor();
   const canvasRef = useRef(null);
   const sessionRef = useRef(null);
   const lastGoodRef = useRef(null);
+  // The live camera, readable from callbacks declared above where it is
+  // computed. Assigned during render further down; a callback only ever reads
+  // it when invoked, so there is no temporal-dead-zone problem.
+  const camRef = useRef({ x: 0, y: 0, zoom: 1 });
+  /**
+   * Clips added without an explicit position, and the world point each should
+   * end up centred on.
+   *
+   * Centring cannot be done at add time: a drawable's bounding box only exists
+   * once the sidecar has traced the image or skeletonised the glyphs. So the
+   * clip lands at the centre point immediately -- on screen, which is the
+   * actual complaint -- and is centred exactly when the geometry arrives.
+   */
+  const pendingPlaceRef = useRef(new Map());
+  /** Latest command table, for the application-menu listener. */
+  const cmdRef = useRef({});
 
   const [frame, setFrame] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -51,6 +76,9 @@ export default function App() {
   // modifier because framing a shot is a sustained activity -- you nudge, play
   // back, nudge again -- and holding a key through all of that is miserable.
   const [tool, setTool] = useState('select');
+  // Whether the title in the menu bar is being edited. Held here rather than in
+  // Menubar because Edit -> Rename project has to be able to start it.
+  const [renaming, setRenaming] = useState(false);
   const [tlHeight, setTlHeight] = useState(232);
   const [dropping, setDropping] = useState(false);
   // Clip bounds must live in state, not on sessionRef: the selection overlay
@@ -111,11 +139,39 @@ export default function App() {
   const pageState = live ? pageStateAt(live, frame / meta.fps) : { pageId: null };
   const livePage = live?.pages?.find((p) => p.id === pageState.pageId) || live?.pages?.[0];
 
+  /**
+   * Finish placing any clip that was added without an explicit position, now
+   * that its traced geometry -- and therefore its size -- is known.
+   *
+   * Two things happen: the drawable is centred on the point it was dropped at
+   * (its origin is a bbox corner, not its middle), and it is shrunk if it would
+   * not fit the visible frame. Both are `replace` edits, so the whole placement
+   * remains a single undo step; a Ctrl+Z right after adding an asset removes it
+   * rather than merely nudging it.
+   */
+  const settlePlacements = useCallback((boxes) => {
+    const pending = pendingPlaceRef.current;
+    if (!pending.size || !boxes) return;
+    const alive = new Set(ed.doc.clips.map((c) => c.id));
+    for (const [id, want] of [...pending]) {
+      // The clip was undone away, or never got the id we asked for. Either way
+      // there is nothing left to place, and keeping the entry would leak.
+      if (!alive.has(id)) { pending.delete(id); continue; }
+      const bbox = boxes.get(id);
+      if (!bbox) continue;                 // not traced yet; try again next rebuild
+      pending.delete(id);
+      ed.patchTransform(id, placeInFrame(bbox, want, meta, PLACE_FILL), { replace: true });
+    }
+  }, [ed, meta]);
+
   // ── structural rebuild ────────────────────────────────────────────
   const rebuild = useCallback(async (doc, path, rev) => {
     if (!doc.clips.length) {
       sessionRef.current = null;
       setBboxes(null);
+      // Nothing left to place -- an undo that emptied the document would
+      // otherwise leave the entry waiting for a clip that no longer exists.
+      pendingPlaceRef.current.clear();
       setError(null);
       ed.markPrepared(rev);
       return;
@@ -129,12 +185,13 @@ export default function App() {
       setBboxes(built.bboxes);
       setError(null);
       ed.markPrepared(rev);
+      settlePlacements(built.bboxes);
     } catch (e) {
       setError(String(e.message || e));
     } finally {
       setStatus(null);
     }
-  }, [ed]);
+  }, [ed, settlePlacements]);
 
   useEffect(() => {
     if (!window.studio || !ed.needsPrepare) return undefined;
@@ -199,6 +256,7 @@ export default function App() {
   const open = useCallback(async (path) => {
     setPlaying(false);
     setSelection(null);
+    pendingPlaceRef.current.clear();
     setStatus({ title: 'Opening project', detail: path ? path.split('/').pop() : '' });
     try {
       const loaded = await window.studio.openProject(path);
@@ -248,16 +306,52 @@ export default function App() {
     ingest(await window.studio.importAssets(kind));
   }, [ingest]);
 
+  /**
+   * Forget an imported file.
+   *
+   * Session state only: nothing is deleted from disk, and clips already placed
+   * are untouched because they carry the path themselves rather than pointing
+   * at this list. Without it the library is append-only, and a mis-imported
+   * file stays in the panel for the rest of the session.
+   */
+  const removeLibraryItem = useCallback((path) => {
+    setLibrary((cur) => cur.filter((a) => a.path !== path));
+  }, []);
+
+  /**
+   * Where a clip added with no explicit position should go, and the bookkeeping
+   * to centre it once its geometry exists.
+   *
+   * World (0,0) is the middle of the frame only while the camera is at the
+   * identity -- which is what made every asset added after a zoom land somewhere
+   * off screen. The camera's own centre is the right answer at any framing.
+   *
+   * @returns {{clipId:string, transform:{x:number,y:number}}}
+   */
+  const placement = useCallback(() => {
+    const cam = camRef.current;
+    const clipId = uniqueId('clip', new Set(ed.doc.clips.map((c) => c.id)));
+    const at = { x: Math.round(cam.x), y: Math.round(cam.y) };
+    pendingPlaceRef.current.set(clipId, { ...at, zoom: cam.zoom });
+    return { clipId, transform: at };
+  }, [ed.doc.clips]);
+
   const placeArt = useCallback((a, world) => {
     // A dropped asset should land where it was dropped. The drawable's own
     // origin is its bbox corner, not its centre, so this puts the top-left of
     // the artwork at the cursor -- close enough to feel intentional, and the
-    // handles are right there to adjust.
-    ed.addClip(
-      { kind: a.kind === 'vector' ? 'vector' : 'image', src: a.path },
-      { duration: 4, transform: world ? { x: Math.round(world.x), y: Math.round(world.y) } : undefined },
-    );
-  }, [ed]);
+    // handles are right there to adjust. Anything added without a cursor gets
+    // centred in the visible frame instead.
+    const asset = { kind: a.kind === 'vector' ? 'vector' : 'image', src: a.path };
+    if (world) {
+      ed.addClip(asset, {
+        duration: 4,
+        transform: { x: Math.round(world.x), y: Math.round(world.y) },
+      });
+      return;
+    }
+    ed.addClip(asset, { duration: 4, ...placement() });
+  }, [ed, placement]);
 
   const addAudioTrack = useCallback((a) => {
     ed.addAudio({ src: a.path, start: 0, trimIn: 0, gain: 1, duration: a.duration || undefined });
@@ -273,9 +367,9 @@ export default function App() {
       fontSize: draft.fontSize,
       penWidth: draft.penWidth,
       color: draft.color,
-    }, { duration: textDuration(text) });
+    }, { duration: textDuration(text), ...placement() });
     setDraft((d) => ({ ...d, text: '' }));
-  }, [draft, ed]);
+  }, [draft, ed, placement]);
 
   const save = useCallback(async (saveAs) => {
     const r = await window.studio.saveProject(ed.doc, ed.path, saveAs);
@@ -321,10 +415,11 @@ export default function App() {
     const onKey = (e) => {
       const mod = e.ctrlKey || e.metaKey;
       const key = e.key.toLowerCase();
-      if (mod && key === 'z') { e.preventDefault(); (e.shiftKey ? ed.redo : ed.undo)(); return; }
-      if (mod && key === 's') { e.preventDefault(); save(e.shiftKey); return; }
-      if (mod && key === 'o') { e.preventDefault(); open(); return; }
-      if (mod && key === 'e') { e.preventDefault(); exportVideo(); return; }
+      // Ctrl-chords belong to the application menu now; handling them here as
+      // well would run every one of them twice. The one exception is
+      // Ctrl+Shift+Z: redo is bound to Ctrl+Y in the menu, and a menu item
+      // carries only one accelerator, so the conventional chord lives here.
+      if (mod && e.shiftKey && key === 'z') { e.preventDefault(); ed.redo(); return; }
       if (mod) return;
 
       if (e.code === 'Space') { e.preventDefault(); setPlaying((p) => !p); }
@@ -339,7 +434,7 @@ export default function App() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [ed, frames, showHand, save, open, exportVideo, deleteSelected]);
+  }, [ed, frames, showHand, deleteSelected]);
 
   // ── drag & drop import ────────────────────────────────────────────
   useEffect(() => {
@@ -464,6 +559,9 @@ export default function App() {
     importAssets,
     addText,
     addPage: () => ed.addPageBreak({ t: frame / meta.fps }),
+    addCameraKeyframe: () => {
+      if (pageState.u >= 1 && livePage) ed.addCameraKeyframe(livePage.id, frame / meta.fps);
+    },
     deleteSelected,
     selectedId: selection?.type === 'clip' ? selection.id : null,
     showHand,
@@ -473,6 +571,7 @@ export default function App() {
     newProject: () => {
       sessionRef.current = null;
       setBboxes(null);
+      pendingPlaceRef.current.clear();
       ed.load(EMPTY_PROJECT, null);
       setSelection(null);
       setFrame(0);
@@ -480,20 +579,59 @@ export default function App() {
     },
   };
 
+  // ── application menu ──────────────────────────────────────────────
+  // The menu lives in the main process (see electron/main.js) and sends command
+  // ids here. `cmd` is rebuilt every render, so it goes through a ref rather
+  // than a dependency array -- otherwise the IPC listener would be torn down and
+  // re-registered on every frame of playback.
+  cmdRef.current = { ...cmd, tool, setTool, startRename: () => setRenaming(true) };
+
+  useEffect(() => {
+    if (!window.studio?.onMenuCommand) return undefined;
+    return window.studio.onMenuCommand((id) => {
+      const c = cmdRef.current;
+      if (id.startsWith('open:')) { c.open(id.slice(5)); return; }
+      ({
+        new: c.newProject,
+        open: () => c.open(),
+        save: () => c.save(false),
+        saveAs: () => c.save(true),
+        export: c.exportVideo,
+        undo: ed.undo,
+        redo: ed.redo,
+        rename: c.startRename,
+        delete: c.deleteSelected,
+        'insert:image': () => c.importAssets('image'),
+        'insert:text': c.addText,
+        'insert:audio': () => c.importAssets('audio'),
+        'insert:page': c.addPage,
+        'insert:camera': c.addCameraKeyframe,
+        'view:hand': c.toggleHand,
+        'view:guides': c.toggleGuides,
+        'view:camera': () => c.setTool(c.tool === 'camera' ? 'select' : 'camera'),
+      }[id] ?? (() => {}))();
+    });
+  }, [ed]);
+
   const seek = (n) => { setPlaying(false); setFrame(Math.max(0, Math.min(frames - 1, n))); };
 
   // The overlay must use the same page and camera renderFrame does, or handles
   // drift away from the artwork -- or hover over a sheet that is not showing.
   const camera = cameraAt(livePage, frame / meta.fps);
+  // Published for the placement callbacks, which are declared above this and so
+  // cannot close over `camera` directly.
+  camRef.current = camera;
 
   return (
     <div className="app">
-      <Menubar ed={ed} cmd={cmd} busy={exporting} />
+      <Menubar ed={ed} cmd={cmd} busy={exporting}
+               renaming={renaming} setRenaming={setRenaming} />
 
       <div className="workspace">
         <Library
           library={library}
           onImport={importAssets}
+          onRemove={removeLibraryItem}
           onPlace={placeArt}
           onAddAudio={addAudioTrack}
           fonts={fonts}

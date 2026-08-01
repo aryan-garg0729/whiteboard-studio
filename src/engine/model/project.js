@@ -13,7 +13,9 @@
 export const SCHEMA_VERSION = 1;
 
 export const DEFAULTS = {
-  meta: { version: SCHEMA_VERSION, fps: 30, width: 1920, height: 1080,
+  // `name` is the authored project title, independent of the filename so it
+  // survives a Save As and a copied file.
+  meta: { version: SCHEMA_VERSION, name: '', fps: 30, width: 1920, height: 1080,
           background: '#fdfdfb', handStyleId: 'hand1', showHand: true },
   transform: { x: 0, y: 0, scale: 1, rotation: 0 },
   camera: { t: 0, x: 0, y: 0, zoom: 1 },
@@ -152,6 +154,9 @@ export function normalizeProject(raw) {
   if (!isObj(raw)) throw new ProjectError('project', 'expected an object');
 
   const meta = { ...DEFAULTS.meta, ...(raw.meta || {}) };
+  if (typeof meta.name !== 'string') {
+    throw new ProjectError('meta.name', `expected a string, got ${JSON.stringify(meta.name)}`);
+  }
   meta.fps = num(meta.fps, 30, 'meta.fps', { min: 1, max: 240 });
   meta.width = num(meta.width, 1920, 'meta.width', { min: 16, max: 7680 });
   meta.height = num(meta.height, 1080, 'meta.height', { min: 16, max: 4320 });
