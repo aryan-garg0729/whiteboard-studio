@@ -25,14 +25,43 @@ import { register } from './registry.js';
 import { easeEnds } from './outlineFill.js';
 
 /**
- * Horizontal travel per up-down cycle of the hand, as a fraction of the font
- * size. Roughly one stroke per letter: faster reads as a vibration, slower as
- * the hand losing interest.
+ * Horizontal travel per loop of the hand, as a fraction of the band height.
+ * Roughly one loop per letter: faster reads as a vibration, slower as the hand
+ * losing interest.
  */
 const OSCILLATION_PERIOD = 0.55;
 
 /** How much of the line band the hand sweeps, as a fraction of its height. */
 const OSCILLATION_REACH = 0.42;
+
+/**
+ * Width of the pen's loop, as a multiple of the forward travel per radian.
+ *
+ * This is what turns a zigzag into cursive. With a pure vertical sine the nib
+ * traces /\/\ -- it only ever moves forward, so every stroke is a straight
+ * diagonal and the whole thing reads as a machine. A real hand writing `eee`
+ * loops: the nib swings *backward* over what it just wrote at the top of each
+ * stroke. Adding a horizontal sine in quadrature makes the path an ellipse
+ * dragged forward -- a prolate trochoid -- and it only forms closed loops when
+ * the ellipse is wider than the drift, i.e. when this is > 1.
+ */
+const LOOP_GAIN = 1.75;
+
+/**
+ * Forward lean of each loop, as a fraction of its height. Upright loops read as
+ * bubbles; real cursive slants with the direction of travel.
+ */
+const LOOP_SLANT = -0.34;
+
+/**
+ * How much the loop height varies, and how fast relative to the loop itself.
+ *
+ * Identical loops are still mechanical, just curved. The ratio is deliberately
+ * irrational-ish so the variation never lines up with the loop and the pattern
+ * does not visibly repeat.
+ */
+const LOOP_VARY = 0.17;
+const LOOP_VARY_RATE = 0.37;
 
 /** Ragged-edge amplitude, as a fraction of the band height. */
 const EDGE_WOBBLE = 0.045;
@@ -240,13 +269,23 @@ export const textReveal = register({
     const mid = (b.top + b.bottom) / 2;
     const period = Math.max(1, b.height * OSCILLATION_PERIOD);
     const theta = (at.inkDone / period) * TAU;
-    const reach = b.height * OSCILLATION_REACH;
+
+    // The loop. `dy` is the vertical stroke and `dx` the backward swing that
+    // closes it; together they trace an ellipse that drifts forward with the
+    // frontier, which is the path a hand takes writing `eee`. The slant term
+    // shears that ellipse so it leans into the direction of travel.
+    const vary = 1 - LOOP_VARY + LOOP_VARY * Math.sin(theta * LOOP_VARY_RATE + phase);
+    const dy = b.height * OSCILLATION_REACH * vary * Math.cos(theta);
+    const dx = (period / TAU) * LOOP_GAIN * Math.sin(theta) + LOOP_SLANT * dy;
 
     return {
-      x: at.x,
+      // The nib leads the reveal around the loop; the mask frontier itself
+      // stays monotonic, so swinging back over finished letters is only the
+      // hand moving, never ink being un-drawn.
+      x: at.ink ? at.x + dx : at.x,
       // Between words the pen is off the paper and travelling, so it rides flat
       // rather than continuing to scrub at nothing.
-      y: at.ink ? mid + reach * Math.sin(theta) : mid,
+      y: at.ink ? mid + dy : mid,
       // Deliberately fixed, not derived from the sweep.
       //
       // Taking the tangent of the oscillation looks right on paper -- the shaft

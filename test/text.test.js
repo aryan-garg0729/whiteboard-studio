@@ -10,7 +10,8 @@ import {
 } from '../src/engine/compile/text.js';
 import { setSurfaceFactory, ClipSurfaces } from '../src/engine/render/surfaces.js';
 import { compileErase, hasInk } from '../src/engine/anim/erase.js';
-import textReveal, { buildSegments } from '../src/engine/anim/textReveal.js';
+import textReveal, { buildSegments, locateFrontier } from '../src/engine/anim/textReveal.js';
+import { easeEnds } from '../src/engine/anim/outlineFill.js';
 
 const stroke = (pts, length) => ({ pts, length: length ?? pts.length * 10 });
 
@@ -183,12 +184,18 @@ test('the reveal sweeps left to right and stays on the letters', { skip: !font }
   const sf = surfacesFor(plan);
   const band = out.lines[0];
 
-  let prevX = -Infinity;
+  // The *frontier* is what reveals ink, and it may never go backwards -- that
+  // would un-draw letters. The nib is a separate thing and does loop back.
+  let prev = -Infinity;
+  for (let i = 0; i <= 200; i++) {
+    const at = locateFrontier(plan.segments, (i / 200) * plan.total);
+    assert.ok(at.x >= prev - 1e-9, `the reveal went backwards at ${i}`);
+    prev = at.x;
+  }
+
   let lifts = 0;
   for (let i = 0; i <= 120; i++) {
     const pen = textReveal.advance(sf, plan, i / 120);
-    assert.ok(pen.x >= prevX - 1e-9, `frontier went backwards at ${i}`);
-    prevX = pen.x;
     assert.ok(pen.y >= band.y0 && pen.y <= band.y1,
       `pen left the letters: ${pen.y} outside ${band.y0}..${band.y1}`);
     assert.equal(pen.active, true, 'the hand never vanishes mid-write');
@@ -196,6 +203,34 @@ test('the reveal sweeps left to right and stays on the letters', { skip: !font }
   }
   assert.ok(lifts > 0, 'the pen must lift crossing the space between words');
   assert.ok(lifts < 20, 'but a hop is brief, not a stall');
+});
+
+test('the nib loops back on itself, as cursive does', { skip: !font }, async () => {
+  // A pure vertical oscillation only ever moves the nib forward, so every
+  // stroke is a straight diagonal and the motion reads as a machine. Writing
+  // `eee` means swinging back over what was just written at the top of each
+  // loop -- so the nib's x must genuinely decrease part of the time.
+  const out = outlineText(font, 'Hello world', { fontSize: 150 });
+  const plan = await textReveal.compile({ id: 't1', layout: out });
+  const sf = surfacesFor(plan);
+
+  const xs = [];
+  for (let i = 0; i <= 600; i++) xs.push(textReveal.advance(sf, plan, i / 600).x);
+  let back = 0;
+  for (let i = 1; i < xs.length; i++) if (xs[i] < xs[i - 1] - 1e-9) back++;
+  assert.ok(back > xs.length * 0.15,
+    `only ${back}/${xs.length} samples move backwards -- the loops are not closing`);
+
+  // ...but it must stay near the frontier: a nib wandering a whole word behind
+  // the ink stops reading as the thing doing the writing.
+  const width = out.inkBbox[2] - out.inkBbox[0];
+  for (let i = 0; i <= 200; i++) {
+    const u = i / 200;
+    const at = locateFrontier(plan.segments, easeEnds(u) * plan.total);
+    const pen = textReveal.advance(sf, plan, u);
+    assert.ok(Math.abs(pen.x - at.x) < width * 0.1,
+      `nib strayed ${Math.abs(pen.x - at.x).toFixed(0)}px from the frontier`);
+  }
 });
 
 test('the hand oscillates rather than tracking the baseline', { skip: !font }, async () => {

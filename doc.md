@@ -256,6 +256,14 @@ mode (`showHand: false`) draws no sprite at all.
   `monoline` flag — measured DejaVu Sans 0.07–0.21 vs DejaVu Serif 0.23–0.27 — and the
   scripts warn. This limitation is now scoped to `draw.handwrite`; `draw.textReveal` sidesteps
   it entirely by drawing the outline rather than a stroke down the middle of it.
+- **The writing hand loops; it does not zigzag.** A pure vertical sine only ever moves the
+  nib forward, so every stroke is a straight diagonal and the motion reads as a machine.
+  `textReveal` adds a horizontal sine in quadrature, making the path an ellipse dragged
+  forward — a prolate trochoid — which closes into cursive `eee` loops only while
+  `LOOP_GAIN > 1`, i.e. the ellipse is wider than the forward drift. Drop it to 1 and the
+  loops open back out into the old zigzag. The nib therefore moves *backwards* about a third
+  of the time; the reveal **frontier** is the thing that must stay monotonic, and they are
+  deliberately separate quantities. A test pins both.
 - **The writing hand must not follow the sweep's tangent.** The oscillation is near-vertical
   and reverses twice per letter, so the raw tangent slams between roughly ±78°, which the rig
   scales into a ±12° rock about the nib — the hand visibly wags as it writes. `textReveal`
