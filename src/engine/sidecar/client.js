@@ -112,6 +112,8 @@ export function toAsset(id, result) {
   return {
     id,
     bbox: result.bbox,
+    // Carried through for the artwork's paper knockout; see render/artAlpha.js.
+    traceMode: result.mode,
     subpaths: result.subpaths.map((s) => ({
       pts: Float64Array.from(s.pts),
       closed: s.closed !== false,

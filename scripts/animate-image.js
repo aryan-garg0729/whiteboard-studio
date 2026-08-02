@@ -21,7 +21,12 @@ import { createSession, renderFrame } from '../src/engine/render/renderFrame.js'
 import { Sidecar, toAsset } from '../src/engine/sidecar/client.js';
 import { exportVideo } from '../src/engine/export/driver.js';
 import { compileErase } from '../src/engine/anim/erase.js';
+import { getAnimation } from '../src/engine/anim/registry.js';
+import { knockOutPaper, wantsPaperKnockout } from '../src/engine/render/artAlpha.js';
+// Imported for their registration side effect; `getAnimation` only knows what
+// has been registered.
 import outlineFill from '../src/engine/anim/outlineFill.js';
+import imageReveal from '../src/engine/anim/imageReveal.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -48,6 +53,10 @@ const HAND = arg('--hand', 'hand1');
 const SHOW_HAND = !flag('--no-hand');
 const FRAMES_ONLY = flag('--frames-only');
 const ERASE = Number(arg('--erase', 0)); // seconds of erase after the draw
+// `imageReveal` shows the real artwork under the pen; `outlineFill` draws a
+// pen-ink stand-in and crossfades to it. Both are kept runnable from here
+// because the difference between them is the thing worth looking at.
+const ANIM = `draw.${arg('--anim', 'imageReveal')}`;
 const OUT = resolve(ROOT, arg('--out', `${basename(IMAGE).replace(/\.[^.]+$/, '')}.mp4`));
 
 async function main() {
@@ -77,7 +86,7 @@ async function main() {
     meta: { fps: FPS, width: WIDTH, height: HEIGHT, background: '#fdfdfb' },
     pages: [{ id: 'p1', cameraKeyframes: [{ t: 0, x: 0, y: 0, zoom: 1 }] }],
     clips: [{
-      id: 'c1', assetId: 'img', animId: 'draw.outlineFill',
+      id: 'c1', assetId: 'img', animId: ANIM,
       start: 0, duration: SECONDS,
       ...(ERASE ? { erase: { start: SECONDS + 0.4, duration: ERASE } } : {}),
       transform: { x: -(aw * fit) / 2, y: -(ah * fit) / 2, scale: fit, rotation: 0 },
@@ -94,7 +103,7 @@ async function main() {
   });
 
   const strokeW = Math.max(1.5, 2.6 / fit);
-  const plan = await outlineFill.compile(asset, {
+  const plan = await getAnimation(ANIM).compile(asset, {
     brushWidth: strokeW,
     fillBrushWidth: Math.max(8, 16 / fit),
   });
@@ -111,7 +120,10 @@ async function main() {
   renderFrame(session, project, 0, ctx, { width: WIDTH, height: HEIGHT, showHand: false });
   const sf = session.surfaces.get('c1');
   const src = await loadImage(resolve(IMAGE));
-  sf.ensureArt().ctx.drawImage(src, 0, 0, aw, ah);
+  const surface = sf.ensureArt();
+  surface.ctx.drawImage(src, 0, 0, aw, ah);
+  // Line art is ink on paper, and the paper is not part of the drawing.
+  if (wantsPaperKnockout(traced.mode)) knockOutPaper(surface, sf.w, sf.h);
   sf.resetAll();
 
   const frames = Math.round((SECONDS + (ERASE ? ERASE + 0.6 : 0)) * FPS);

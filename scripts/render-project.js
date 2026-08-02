@@ -25,7 +25,12 @@ import { paintVectorArt } from '../src/engine/render/vectorArt.js';
 import { compileErase } from '../src/engine/anim/erase.js';
 import { exportVideo } from '../src/engine/export/driver.js';
 import { styleIdsFor } from '../src/engine/hand/styles.js';
+import { getAnimation } from '../src/engine/anim/registry.js';
+import { knockOutPaper, wantsPaperKnockout } from '../src/engine/render/artAlpha.js';
+// Imported for their registration side effect; `getAnimation` only knows what
+// has been registered.
 import outlineFill from '../src/engine/anim/outlineFill.js';
+import imageReveal from '../src/engine/anim/imageReveal.js';
 import handwrite from '../src/engine/anim/handwrite.js';
 import textReveal from '../src/engine/anim/textReveal.js';
 
@@ -52,13 +57,20 @@ const projectDir = dirname(projectPath);
 const rel = (p) => (isAbsolute(p) ? p : resolve(projectDir, p));
 
 /**
+ * Which animation draws this clip. Preview and export must agree, so this is
+ * the clip's own `animId` here exactly as it is in the app -- the pre-reveal
+ * default is kept for documents written before there was a choice.
+ */
+const drawableAnim = (clip) => getAnimation(clip.animId ?? 'draw.outlineFill');
+
+/**
  * Vectors skip the sidecar: the geometry is already exact, so tracing it would
  * only throw information away.
  */
 async function buildVectorClip(clip, asset) {
   const parsed = parseSvg(readFileSync(rel(asset.src), 'utf8'), { eps: 0.2 });
   if (!parsed.subpaths.length) throw new Error(`${asset.src}: no drawable geometry`);
-  const plan = await outlineFill.compile(toAsset(clip.assetId, parsed), {
+  const plan = await drawableAnim(clip).compile(toAsset(clip.assetId, parsed), {
     brushWidth: Math.max(1.5, 2.4 / clip.transform.scale),
     fillBrushWidth: Math.max(8, 15 / clip.transform.scale),
     ...clip.params,
@@ -68,7 +80,7 @@ async function buildVectorClip(clip, asset) {
 
 async function buildImageClip(session, sidecar, project, clip, asset) {
   const traced = await sidecar.vectorize(rel(asset.src), asset.trace || {});
-  const plan = await outlineFill.compile(toAsset(clip.assetId, traced), {
+  const plan = await drawableAnim(clip).compile(toAsset(clip.assetId, traced), {
     brushWidth: Math.max(1.5, 2.4 / clip.transform.scale),
     fillBrushWidth: Math.max(8, 15 / clip.transform.scale),
     ...clip.params,
@@ -173,7 +185,11 @@ async function main() {
       // the reveal artwork and what the clip settles to.
       paintVectorArt(art, vector.regions, vector.subpaths);
     } else {
-      art.drawImage(await loadImage(src), 0, 0, traced.width, traced.height);
+      const surface = sf.ensureArt();
+      surface.ctx.drawImage(await loadImage(src), 0, 0, traced.width, traced.height);
+      // The paper is knocked out of line art so the artwork carries its own
+      // silhouette; see render/artAlpha.js.
+      if (wantsPaperKnockout(traced.mode)) knockOutPaper(surface, sf.w, sf.h);
     }
   }
 

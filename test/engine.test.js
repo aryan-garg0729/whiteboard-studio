@@ -5,7 +5,9 @@ import { readFileSync } from 'node:fs';
 import {
   arcLengths, makeStroke, makePhase, locate, floorIndex, cubicSegments, tangentAt,
 } from '../src/engine/compile/geometry.js';
-import { spansAt, decomposeCells, scribbleRegion, mulberry32 } from '../src/engine/compile/scribble.js';
+import {
+  spansAt, decomposeCells, scribbleRegion, mulberry32, clampWobble, MAX_COVERAGE_RATIO,
+} from '../src/engine/compile/scribble.js';
 import { minScale, exitDistance, solveHand, elbowOutside, EDGE_MARGIN } from '../src/engine/hand/rig.js';
 import { HAND_STYLE_IDS } from '../src/engine/hand/styles.js';
 
@@ -145,8 +147,50 @@ test('scribbleRegion is deterministic for a given seed', () => {
 });
 
 test('scribbleRegion returns nothing for a degenerate region', () => {
-  const { pts } = scribbleRegion([rect(0, 0, 0.001, 0.001)], { brushWidth: 8 });
+  // Genuinely zero extent. Anything with real extent, however small, now gets a
+  // pass -- see the thin-region test below.
+  const { pts } = scribbleRegion([rect(0, 0, 0, 0)], { brushWidth: 8 });
   assert.equal(pts.length, 0);
+});
+
+test('a region thinner than one pass still gets a pass through its middle', () => {
+  // The old loop stepped `y = minY + d/2; y < maxY; y += d`, so a region less
+  // than half a step tall produced no scan line at all, no mask, and a
+  // permanent white slash through the finished picture wherever a shape was
+  // thin. Scanning at the scribble angle so the bar is thin across the sweep.
+  const { pts } = scribbleRegion([rect(0, 0, 200, 3)], { brushWidth: 14, angleDeg: 0 });
+  assert.ok(pts.length >= 4, 'a 3px bar must still be swept');
+
+  let minY = Infinity; let maxY = -Infinity;
+  for (let i = 1; i < pts.length; i += 2) {
+    if (pts[i] < minY) minY = pts[i];
+    if (pts[i] > maxY) maxY = pts[i];
+  }
+  assert.ok(minY > 0 && maxY < 3, `the pass must lie inside the bar, got ${minY}..${maxY}`);
+});
+
+test('the last pass lands within half a step of the far edge', () => {
+  // The old loop could stop a full step short, leaving an uncovered sliver
+  // along the trailing edge of every region.
+  const h = 97.3;                       // deliberately not a multiple of the step
+  const w = 14;
+  const { pts, spacing } = scribbleRegion([rect(0, 0, 200, h)], { brushWidth: w, angleDeg: 0 });
+  let maxY = -Infinity;
+  for (let i = 1; i < pts.length; i += 2) if (pts[i] > maxY) maxY = pts[i];
+  assert.ok(h - maxY < spacing / 2 + 1e-6,
+    `last pass ${(h - maxY).toFixed(2)}px short of the edge, over half a ${spacing}px step`);
+});
+
+test('adjacent passes always overlap, whatever the caller asks for', () => {
+  // Coverage holds only while (1 - overlap)(1 + 2*wobble) < 1. The shipping
+  // defaults satisfy it by 0.845, but nothing enforced it and the docstring
+  // itself suggests an overlap that does not.
+  for (const [overlap, wobble] of [[0.35, 0.15], [0.45, 0.12], [0.25, 0.4], [0.1, 1]]) {
+    const w = clampWobble(wobble, overlap);
+    assert.ok((1 - overlap) * (1 + 2 * w) <= MAX_COVERAGE_RATIO + 1e-9,
+      `overlap ${overlap} + wobble ${wobble} leaves gaps`);
+    assert.ok(w <= wobble, 'the clamp may only ever reduce the wobble');
+  }
 });
 
 test('mulberry32 is stable across calls', () => {

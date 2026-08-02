@@ -150,6 +150,24 @@ export function decomposeCells(lines, overlapMin) {
 }
 
 /**
+ * Worst-case separation between adjacent passes, as a fraction of brush width.
+ *
+ * Two passes sit `spacing = brushWidth * (1 - overlap)` apart and the wobble can
+ * push them a further `wobble * spacing` apart each, in antiphase -- so the
+ * passes only overlap while `(1 - overlap) * (1 + 2 * wobble) < 1`. The shipping
+ * defaults give 0.845, which is fine, but nothing enforced it: turning `overlap`
+ * down to the 0.25 the docstring below suggests, or `wobble` past 0.27, opens
+ * periodic gaps at the scribble angle that no later stage can close.
+ */
+export const MAX_COVERAGE_RATIO = 0.92;
+
+/** Largest wobble that still leaves adjacent passes overlapping. */
+export function clampWobble(wobble, overlap) {
+  const room = MAX_COVERAGE_RATIO / Math.max(1e-6, 1 - overlap);
+  return Math.max(0, Math.min(wobble, (room - 1) / 2));
+}
+
+/**
  * Generate the scribble polyline for one region.
  *
  * @param {Float64Array[]} rings outer ring first, then holes, in object space
@@ -170,8 +188,8 @@ export function scribbleRegion(rings, opts = {}) {
   const brushWidth = opts.brushWidth ?? 8;
   const angle = ((opts.angleDeg ?? -45) * Math.PI) / 180;
   const overlap = opts.overlap ?? 0.35;
-  const wobble = opts.wobble ?? 0.15;
   const overshoot = opts.overshoot ?? 0.35;
+  const wobble = clampWobble(opts.wobble ?? 0.15, overlap);
   const rand = mulberry32(opts.seed ?? 1);
 
   const d = Math.max(1e-6, brushWidth * (1 - overlap));
@@ -182,11 +200,26 @@ export function scribbleRegion(rings, opts = {}) {
   const rot = rotateRings(rings, cos, sin);
   const [, minY, , maxY] = ringsBounds(rot);
 
-  // Half-step offset so an axis-aligned rectangle never samples exactly on its
-  // own top/bottom edge.
+  // Scan lines are distributed evenly across the region rather than stepped
+  // from one edge, and there is always at least one.
+  //
+  // Both of those are load-bearing. Stepping `for (y = minY + d/2; y < maxY;
+  // y += d)` produced *no* line at all for a region thinner than half a step --
+  // about 5px at the default brush -- so any elongated shape thinner than that
+  // got no mask, and the finished image kept a white slash straight through it.
+  // The same loop left the last line up to a full step short of `maxY`, an
+  // uncovered sliver along the far edge of every region. Spreading `n` lines
+  // evenly puts the outermost ones half a step from each edge, well inside the
+  // brush radius, and `step <= d` always, so coverage only improves.
+  const span = maxY - minY;
+  if (!(span > 0)) return { pts: [], spacing: d, cells: 0 };
+  const n = Math.max(1, Math.ceil(span / d));
+  const step = span / n;
+
   const lines = [];
   const ys = [];
-  for (let y = minY + d * 0.5; y < maxY; y += d) {
+  for (let k = 0; k < n; k++) {
+    const y = minY + step * (k + 0.5);
     const s = spansAt(rot, y);
     if (s.length) { lines.push(s); ys.push(y); }
   }
@@ -213,8 +246,10 @@ export function scribbleRegion(rings, opts = {}) {
         let xb = dir > 0 ? span[1] : span[0];
 
         // Ragged ends: a person colouring does not stop exactly on the
-        // boundary every pass. Overshoot is safe because the mask is clipped
-        // to the region at render time.
+        // boundary every pass. Overshooting the region is safe because the
+        // mask only ever reveals artwork -- past the edge of the shape there
+        // is nothing to reveal, so the spill is invisible. (It is not clipped
+        // to the region anywhere, despite what this comment used to claim.)
         xa -= dir * (rand() - 0.5) * 0.24 * d;
         xb += dir * (overshoot * d + (rand() - 0.5) * 0.24 * d);
 

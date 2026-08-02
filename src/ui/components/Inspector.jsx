@@ -12,7 +12,8 @@ import FontPicker from './FontPicker.jsx';
 const FRAME_MARGIN = 1.24;
 
 const ANIMATION_LABELS = {
-  'draw.outlineFill': 'Outline, then colour',
+  'draw.imageReveal': 'Draw (the artwork appears)',
+  'draw.outlineFill': 'Outline, then colour (legacy)',
   'draw.textReveal': 'Write (letters appear)',
   'draw.handwrite': 'Trace letterforms',
 };
@@ -57,6 +58,13 @@ function ClipInspector({ ed, clip, asset, fonts, frame, fps, selection, bboxes }
               .map((v) => <option key={v} value={v}>{ANIMATION_LABELS[v]}</option>)}
           </select>
         </Field>
+        {asset.kind !== 'text' && clip.animId === 'draw.outlineFill' && (
+          <div className="hint">
+            Draws a pen-ink stand-in and crossfades to the real asset when it
+            finishes — so the picture changes at the end, and anything the pen
+            missed stays missing. “Draw” reveals the artwork itself instead.
+          </div>
+        )}
         {asset.kind === 'text' && clip.animId === 'draw.handwrite' && (
           <div className="hint">
             Traces a centreline through each letter. Faithful on near-monoline

@@ -17,8 +17,12 @@
  *                stroke?:string, strokeWidth?:number}>} subpaths
  */
 export function paintVectorArt(ctx, regions = [], subpaths = []) {
-  // Reverse: regions arrive largest-first, and the largest belongs underneath.
-  for (const region of [...regions].reverse()) {
+  // As emitted, which is largest-first from both producers (`svgDoc.js` and the
+  // sidecar both sort by descending area). Canvas paints in iteration order, so
+  // largest-first *is* largest-underneath. Reversing here -- as this did --
+  // painted the biggest region last, on top of everything inside it, which
+  // blanked out the contents of any SVG that has a background shape.
+  for (const region of regions) {
     ctx.beginPath();
     for (const ring of region.rings) {
       ctx.moveTo(ring[0], ring[1]);

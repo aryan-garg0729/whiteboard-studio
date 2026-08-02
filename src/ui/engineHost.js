@@ -10,8 +10,13 @@ import { setSurfaceFactory } from '../engine/render/surfaces.js';
 import { createSession, ensureSurfaces, renderFrame } from '../engine/render/renderFrame.js';
 import { makeStroke } from '../engine/compile/geometry.js';
 import { compileErase } from '../engine/anim/erase.js';
+import { getAnimation } from '../engine/anim/registry.js';
 import { paintVectorArt } from '../engine/render/vectorArt.js';
+import { knockOutPaper, wantsPaperKnockout } from '../engine/render/artAlpha.js';
+// Imported for their registration side effect as much as for their exports:
+// `getAnimation` can only hand back what has been registered.
 import outlineFill from '../engine/anim/outlineFill.js';
+import imageReveal from '../engine/anim/imageReveal.js';
 import handwrite from '../engine/anim/handwrite.js';
 import textReveal from '../engine/anim/textReveal.js';
 
@@ -85,7 +90,9 @@ export async function buildSession(loaded) {
           rings: r.rings.map(f64), color: r.color, bbox: r.bbox,
         })),
       };
-      plan = await outlineFill.compile(asset, {
+      // Dispatch on the clip's own animation rather than assuming outlineFill:
+      // an image can now also be drawn by revealing the artwork itself.
+      plan = await getAnimation(clip.animId ?? 'draw.outlineFill').compile(asset, {
         brushWidth: Math.max(1.5, 2.4 / clip.transform.scale),
         fillBrushWidth: Math.max(8, 15 / clip.transform.scale),
         ...clip.params,
@@ -106,8 +113,16 @@ export async function buildSession(loaded) {
   for (const { clipId, prepared: p } of artJobs) {
     const sf = session.surfaces.get(clipId);
     if (!sf) continue;
-    const art = sf.ensureArt().ctx;
-    if (p.art) art.drawImage(await loadImage(p.art), 0, 0, p.width, p.height);
+    const surface = sf.ensureArt();
+    const art = surface.ctx;
+    if (p.art) {
+      art.drawImage(await loadImage(p.art), 0, 0, p.width, p.height);
+      // A drawing arrives as an opaque rectangle of white with some ink on it.
+      // Giving it a real silhouette is what lets the reveal mask be generous
+      // instead of being the only thing standing between the artwork and the
+      // paper -- see render/artAlpha.js.
+      if (wantsPaperKnockout(p.traceMode)) knockOutPaper(surface, sf.w, sf.h);
+    }
     // Glyph outlines are regions with no separate stroked subpaths. The
     // 'evenodd' fill paintVectorArt already uses is what keeps counters open.
     else paintVectorArt(art, p.regions, p.subpaths ?? []);

@@ -66,7 +66,8 @@ src/
       text.js        #   opentype.js layout + glyph stroke ordering/orientation
     anim/
       registry.js    #   AnimationType plugin registry; PenState contract
-      outlineFill.js #   images: outline pass, then zig-zag colour pass
+      imageReveal.js #   images: the pen reveals the real artwork (the default)
+      outlineFill.js #   images: outline pass, then zig-zag colour pass (legacy)
       handwrite.js   #   text: centreline strokes
       erase.js       #   erase modifier (not an animation type — see below)
     render/
@@ -75,6 +76,7 @@ src/
       surfaces.js    #   per-clip canvases + committed/active raster strategy
       drawHand.js    #   hand sprite placement
       vectorArt.js   #   a vector's own fills+strokes; reveal source AND settle target
+      artAlpha.js    #   knocks the paper out of a raster so it has a silhouette
     model/project.js # project schema, defaults, validation; the seam the UI sits on
     hand/rig.js      # nib placement, rotation clamp, never-detached scale solve
     hand/styles.js   # which manifests exist: drawing hands vs. tool styles (eraser)
@@ -195,6 +197,7 @@ mode (`showHand: false`) draws no sprite at all.
 | Hand rig | Placement, rotation clamp, edge constraint, portrait arm-stretch |
 | Raster vectorization | Line-art/photo classification, k-means in Lab, `RETR_CCOMP` even-odd rings; **thin clusters become centrelines, not contours** |
 | Text write (default) | `draw.textReveal` — real filled letterforms revealed left to right under an oscillating hand, word by word. `outlineText()` keeps the glyph outline opentype already has, so **text needs no sidecar at all** and is instant |
+| Image drawing | `draw.imageReveal` — the pen paints a mask and `composite()` shows the real artwork through it, so what is drawn *is* the asset. Each region closes with its own polygon as its scribble finishes, so no coverage hole can survive; `settles: false`, because there is nothing to change into |
 | Text handwriting | `draw.handwrite` — opentype.js layout + skeletonized centrelines, role-based stroke order. Still selectable, and still what every pre-existing project uses |
 | SVG import | Shapes, groups, nested transforms, style/presentation attrs, fill→region, holes |
 | App shell | Electron + React; library, stage, inspector, timeline. Commands live in the **real application menu** (`buildMenu` in `electron/main.js`) and reach the renderer over `menu:command`; the in-app row keeps only the brand, the click-to-rename project title, undo/redo and Export |
@@ -207,7 +210,7 @@ mode (`showHand: false`) draws no sprite at all.
 | Inspector | Clip timing/transform/erase, text and asset params, composition settings |
 | Undo/redo | Pure document transforms; drags coalesce into one history entry |
 | Export UI | Drives `render-project.js` in a child process with live frame progress |
-| Settle to original | Once a clip finishes drawing it crossfades from the pen's heavier ink to the source asset over 0.35s — pure function of `t`, so seeking is exact |
+| Settle to original | `draw.outlineFill` only: it draws a pen-ink stand-in, so it crossfades to the source asset over 0.35s once the clip ends — pure function of `t`, so seeking is exact. An animation that already shows the artwork sets `settles: false` and is never asked |
 | Direct manipulation | Click to select, drag to move, corner handles to resize with the opposite corner anchored |
 | Erase | Top-down sweep, `destination-out` on the clip layer only; runs on the settled artwork |
 | Export | 1080p MP4 at ~42fps; `ffprobe`-verified h264/yuv420p/exact duration; ffmpeg audio graph |
@@ -300,6 +303,15 @@ mode (`showHand: false`) draws no sprite at all.
   (-90, 90]. With `alignFactor` 0.16 the sprite moves within about +/-14deg, well inside
   the +/-25deg the scale solve assumes. Turning either up brings back the frantic
   scan-line swing.
+- **The reveal can only show what the vectorizer traced.** A raster pixel covered by no
+  region and no centreline has nothing to reveal it, and the vectorizer legitimately drops
+  contours under `min_area`. `artAlpha.js` shrinks the problem to invisibility rather than
+  closing it: those pixels have real alpha and the closure masks are generous, so they
+  surface wherever a neighbour's brush passes over them. Anything still missed is below the
+  tracer's noise floor.
+- **Photographs keep their paper.** `knockOutPaper` is skipped when the classifier said
+  `photo` — a sky is not a background, and the soft ramp would eat the highlights. A photo
+  therefore still relies on its regions tiling the picture, which they do.
 - **Centrelining depends on the classifier calling the image line art.** A photo keeps the
   region-contour path, where a double outline is not meaningful anyway. A thick elongated
   shape (a banner) stays filled by design -- see `STROKE_MAX_WIDTH_FRAC`.
@@ -498,6 +510,32 @@ regression test.
     `x`, which slid the comb along as the frontier advanced and un-revealed ink; it is now a
     function of `y` alone and only ever lags the frontier, never leads it — leading rows
     jump backwards the instant the edge squares off.
+34. **The finished image kept white cuts through solid black.** `art` is never blitted
+    unmasked: `composite()` shows `art ∩ fillMask` while drawing and `art ∩ (fill ∪ ink)`
+    once settled, so a pixel no brush touched was gone for good — and the pen's marks are a
+    stand-in for a silhouette the artwork did not carry. Three coverage holes were real:
+    `MIN_SCRIBBLE_AREA` dropped small regions entirely, the scan-line loop produced **no**
+    pass at all for a region thinner than half a step (a linear slash), and the last pass
+    could stop a full step short of the far edge. `draw.imageReveal` removes the dependency
+    -- the artwork carries its own alpha (`render/artAlpha.js`) and each region closes with
+    its own polygon -- and the scan-line distribution is fixed for `outlineFill` too.
+35. **`putImageData` is not portable about the CTM.** The spec says it ignores the
+    transform and browsers do; node canvases apply it. The artwork surface carries a
+    standing `-origin` translate, so knocking the paper out slid the whole image 32px and
+    the reveal mask then lined up with nothing: a fifth of the picture never appeared, in a
+    way that looked exactly like a coverage bug. Neutralise the transform around any
+    get/putImageData pair rather than trusting either behaviour.
+36. **Asking for a settle with no ink is not a no-op.** `composite(settle)` rebuilds the
+    same `art ∩ mask` it already blitted and draws it again at `globalAlpha = settle`, and
+    source-over of an image onto itself gives `a·(1 + s - a·s) > a` for any partial alpha —
+    so every antialiased edge and soft grey would have thickened over the settle window.
+    `settles: false` on the animation, honoured in `renderFrame`, is the fix.
+37. **`paintVectorArt` painted the largest region on top.** Both producers emit regions
+    largest-first, so the `[...regions].reverse()` iterated smallest-first and canvas
+    painted the biggest one last — the opposite of the comment beside it. An SVG with a
+    background shape came out as a flat rectangle of background, and only *after* the clip
+    settled, because until then the pen's own ink covered it.
+
 33. **System font enumeration cannot promise a handwriting face.** A stock Linux box lists
     a couple of hundred families (223 here) and not one script face among them, which is the
     only category that matters for a whiteboard tool — and a project authored against
@@ -535,6 +573,11 @@ regression test.
   under the cursor will otherwise be re-entered by Chromium's synthetic `pointermove`.
 - **Selection UI is DOM, not canvas.** `renderFrame` owns every exported pixel, so a
   handle drawn into the canvas could leak into an export. `StageOverlay` cannot.
+- **The mask is the only thing standing between the artwork and the paper.** Nothing ever
+  blits `art` unmasked, so a hole in the mask is a hole in the finished picture, not a
+  patchy fill. Any change to the scribble's coverage maths is therefore a correctness
+  change, and `(1 - overlap)(1 + 2·wobble) < 1` is the invariant that keeps adjacent passes
+  touching — `clampWobble` enforces it.
 - **The reveal mask may never retreat, per scanline.** A monotonic frontier is not enough:
   any ragged edge must be a function of `y` alone and must lag, or ink un-draws itself.
 
@@ -614,6 +657,8 @@ everything to them.
 | `surfaces.test.js` | Layer reset semantics, origin-aware clearing, empty-mask compositing |
 | `erase.test.js` | Ink extent, sweep direction, the `used` flag, degenerate plans |
 | `export.test.js` | ffmpeg args and audio filter graph |
+| `imageReveal.test.js` | The finished frame equals the artwork, no gap survives at u=1, nothing changes when the pen stops, closure is progressive, shared-layer scrub-back |
+| `artAlpha.test.js` | The paper ramp, saturated pales, alpha multiplied not replaced, and the putImageData/CTM trap |
 | `text.test.js` | Glyph key stability, role classification, stroke orientation and ordering, the reveal's frontier and mask (last letter whole at `u=1`, no scanline un-reveals) |
 | `project.test.js` | Schema defaults, validation paths, duration maths, the bundled example |
 | `svg.test.js` | Shapes, transforms, fill inheritance, viewBox, rings/holes, .svg routing |
@@ -623,7 +668,9 @@ everything to them.
 
 UI behaviour is checked headlessly with `WB_SMOKE_SCRIPT`, which evaluates an interaction
 script in the renderer (click through tabs, add a clip, drag it, resize it, undo) and
-prints what changed. `scripts/smoke/font-picker.js` checks the Text tab the same way --
+prints what changed. `scripts/smoke/image-reveal.js` switches the demo project's image clip to the reveal and
+checks the stage still paints after the rebuild, and
+`scripts/smoke/font-picker.js` checks the Text tab the same way --
 a face whose bytes never load falls back to the UI font and still *looks* like a fine row,
 so it asserts every row's computed family is the loaded one. Assert against `window.__studioState()` — a read-only view of the
 document, selection and frame — rather than scraping input values, which lag a commit

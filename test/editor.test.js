@@ -31,7 +31,7 @@ test('an added clip lands after everything already on the timeline', () => {
   doc = addClipTo(doc, { kind: 'text', text: 'hi' }, { duration: 2 });
   assert.equal(doc.clips[1].start, 4, 'second clip starts where the first ends');
   assert.equal(doc.clips[1].animId, 'draw.textReveal', 'text defaults to the reveal');
-  assert.equal(doc.clips[0].animId, 'draw.outlineFill');
+  assert.equal(doc.clips[0].animId, 'draw.imageReveal', 'artwork defaults to the reveal');
 });
 
 test('a clip is appended after an erase sweep, not after the draw', () => {

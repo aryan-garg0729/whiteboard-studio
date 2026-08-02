@@ -26,7 +26,7 @@ export const ASSET_KINDS = new Set(['image', 'vector', 'text']);
 
 /** Animation ids that ship today. Kept as data so the check stays honest. */
 export const KNOWN_ANIMATIONS = new Set([
-  'draw.outlineFill', 'draw.textReveal', 'draw.handwrite',
+  'draw.imageReveal', 'draw.outlineFill', 'draw.textReveal', 'draw.handwrite',
 ]);
 
 /**
@@ -37,8 +37,10 @@ export const KNOWN_ANIMATIONS = new Set([
  * just invites a clip that renders nothing.
  */
 export const ANIMATIONS_FOR_KIND = {
-  image: ['draw.outlineFill'],
-  vector: ['draw.outlineFill'],
+  // Reveal first: it is the default for anything new, and `draw.outlineFill`
+  // is kept only so projects authored against it keep looking the way they did.
+  image: ['draw.imageReveal', 'draw.outlineFill'],
+  vector: ['draw.imageReveal', 'draw.outlineFill'],
   text: ['draw.textReveal', 'draw.handwrite'],
 };
 

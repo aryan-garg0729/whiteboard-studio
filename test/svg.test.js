@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
+import { createCanvas } from '@napi-rs/canvas';
+
 import { parseSvg, parseTransform, matMul, shapeToPath } from '../src/engine/compile/svgDoc.js';
+import { paintVectorArt } from '../src/engine/render/vectorArt.js';
 import { readFileSync } from 'node:fs';
 import { normalizeProject } from '../src/engine/model/project.js';
 
@@ -140,4 +143,24 @@ test('the bundled SVG example parses into something drawable', () => {
   assert.ok(r.subpaths.length >= 5);
   assert.ok(r.regions.length >= 4);
   assert.equal(r.width, 400);
+});
+
+test('a shape drawn inside a bigger one is not painted over by it', () => {
+  // paintVectorArt used to reverse the region list before painting. Both
+  // producers emit largest-first, so reversing put the *largest* region last --
+  // on top of everything inside it. A drawing with a background shape came out
+  // as a flat rectangle of background, and only once the clip settled, because
+  // until then the pen's own ink was covering it.
+  const canvas = createCanvas(100, 100);
+  const ctx = canvas.getContext('2d');
+  const r = parseSvg(svg(
+    '<rect x="0" y="0" width="100" height="100" fill="#ff0000"/>'
+    + '<rect x="40" y="40" width="20" height="20" fill="#0000ff"/>',
+  ));
+  assert.equal(r.regions.length, 2);
+  paintVectorArt(ctx, r.regions, r.subpaths);
+
+  const [red, green, blue] = ctx.getImageData(50, 50, 1, 1).data;
+  assert.deepEqual([red, green, blue], [0, 0, 255],
+    'the small shape must sit on top of the big one');
 });

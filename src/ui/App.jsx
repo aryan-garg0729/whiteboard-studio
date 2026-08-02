@@ -542,6 +542,9 @@ export default function App() {
     window.__studioState = () => ({
       clips: ed.doc.clips.map((c) => ({
         id: c.id, ...c.transform, start: c.start, duration: c.duration, trackId: c.trackId,
+        // Which asset and which animation, so a script can find "the image
+        // clip" without scraping the timeline for a class name.
+        assetId: c.assetId, animId: c.animId,
       })),
       tracks: ed.doc.tracks,
       // Whole, not summarised: a smoke script asserting on an asset field --

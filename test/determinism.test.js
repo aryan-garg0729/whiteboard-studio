@@ -16,6 +16,7 @@ import { setSurfaceFactory } from '../src/engine/render/surfaces.js';
 import { createSession, renderFrame } from '../src/engine/render/renderFrame.js';
 import { flattenPath } from '../src/engine/compile/svgPath.js';
 import outlineFill from '../src/engine/anim/outlineFill.js';
+import imageReveal from '../src/engine/anim/imageReveal.js';
 
 setSurfaceFactory((w, h) => {
   const canvas = createCanvas(w, h);
@@ -111,4 +112,47 @@ test('frame time derives from the index rather than accumulating', async () => {
   }
   const sf = session.surfaces.get('c');
   assert.equal(sf.lastProgress, 1, 'clip should be exactly complete at frame 30');
+});
+
+test('the reveal holds the same contract as the pen-ink path', async () => {
+  // Same four guarantees, exercised through the animation that shares one layer
+  // between both phases and paints closure geometry inside commitRange -- the
+  // two places a stateful shortcut would most easily hide.
+  const revealProject = {
+    ...project,
+    clips: [{ ...project.clips[0], animId: 'draw.imageReveal' }],
+  };
+  const build = async () => {
+    const s = createSession();
+    s.plans.set('c', await imageReveal.compile(asset, { brushWidth: 3, fillBrushWidth: 12 }));
+    return s;
+  };
+  const hash = (session, n) => {
+    const canvas = createCanvas(W, H);
+    renderFrame(session, revealProject, n, canvas.getContext('2d'),
+      { width: W, height: H, showHand: false });
+    return createHash('sha256').update(canvas.toBuffer('image/png')).digest('hex');
+  };
+  const walkTo = (session, n) => {
+    let h;
+    for (let i = 0; i <= n; i++) h = hash(session, i);
+    return h;
+  };
+
+  const a = await build();
+  const b = await build();
+  assert.equal(walkTo(a, 22), walkTo(b, 22), 'two sessions must agree');
+
+  const scrubbed = await build();
+  for (let i = 0; i <= 40; i++) hash(scrubbed, i);
+  assert.equal(hash(scrubbed, 22), walkTo(await build(), 22),
+    'a backward seek must land on the forward-played pixels');
+
+  const real = Math.random;
+  Math.random = () => { throw new Error('renderFrame called Math.random'); };
+  try {
+    for (let i = 0; i < 20; i++) hash(a, i);
+  } finally {
+    Math.random = real;
+  }
 });

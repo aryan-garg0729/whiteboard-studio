@@ -47,6 +47,13 @@ function serializeDrawable(traced, art) {
   return {
     kind: 'drawable',
     bbox: arr(traced.bbox),
+    // Which way the vectorizer read the image. The renderer needs it to decide
+    // whether the artwork has paper to knock out: line art is ink on white and
+    // its background means nothing, a photograph's light pixels are the picture.
+    // Named `traceMode` because `mode` is already the text payload's own
+    // discriminator, and one key meaning two things across `kind`s is a trap.
+    traceMode: traced.mode ?? null,
+    detectedTraceMode: traced.detectedMode ?? null,
     width: traced.width,
     height: traced.height,
     subpaths: traced.subpaths.map((s) => ({

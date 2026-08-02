@@ -209,7 +209,12 @@ export function renderPage(session, project, pageId, t, ctx, opts) {
       }
     }
 
-    const out = sf.composite(settleAt(clip, t));
+    // An animation that reveals the artwork itself has nothing to settle to,
+    // and asking for it anyway is not the no-op it looks like: `composite`
+    // would draw the revealed artwork over itself at `globalAlpha = settle`,
+    // and source-over of an image onto itself raises every partial alpha, so
+    // antialiased edges and soft greys thicken over the settle window.
+    const out = sf.composite(anim.settles === false ? 0 : settleAt(clip, t));
 
     // world -> screen
     const tr = clip.transform || { x: 0, y: 0, scale: 1, rotation: 0 };

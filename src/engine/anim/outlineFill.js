@@ -65,11 +65,133 @@ export function strokeWhole(ctx, st) {
   ctx.stroke();
 }
 
-function applyBrush(ctx, st, color) {
+export function applyBrush(ctx, st, color, widthScale = 1) {
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
-  ctx.lineWidth = st.width;
+  ctx.lineWidth = st.width * widthScale;
   ctx.strokeStyle = color || st.color;
+}
+
+/**
+ * Fill a stroke's `closure` geometry: the exact shapes it is responsible for
+ * having covered by the time it finishes.
+ *
+ * Only the reveal animation attaches any. A scribble is a good enough *pen* --
+ * it is what a person colouring in actually does -- but it is not a guaranteed
+ * cover, and under a reveal every uncovered pixel is a permanent hole in the
+ * finished picture rather than a slightly patchy fill. Painting the region's
+ * own polygon as its scribble completes closes that without changing what the
+ * pen is seen to do.
+ */
+export function paintClosure(ctx, closure, color = '#ffffff') {
+  ctx.fillStyle = color;
+  for (const shape of closure) {
+    ctx.beginPath();
+    for (const ring of shape.rings) {
+      if (ring.length < 6) continue;
+      ctx.moveTo(ring[0], ring[1]);
+      for (let i = 2; i < ring.length; i += 2) ctx.lineTo(ring[i], ring[i + 1]);
+      ctx.closePath();
+    }
+    // evenodd, so a region's holes stay holes -- the same rule paintVectorArt
+    // uses on the artwork this mask reveals.
+    ctx.fill('evenodd');
+  }
+}
+
+/**
+ * Turn a traced asset into the ordered stroke list both image animations walk.
+ *
+ * Shared rather than duplicated: `draw.imageReveal` differs only in what it
+ * paints the strokes *with*, and the ordering, scribble and pacing are the part
+ * that took the tuning. With no `opts` this is `draw.outlineFill` unchanged --
+ * tiny regions skipped, no closure geometry -- so an existing project draws the
+ * way it always did.
+ *
+ * @param {{subpaths:Array, regions:Array, bbox:number[], id:string}} asset
+ * @param {Object} [params] paramSchema values
+ * @param {{minScribbleArea?:number, closeMask?:boolean}} [opts]
+ *   `closeMask` attaches each region's own polygon to the stroke that fills it;
+ *   see `paintClosure`. `minScribbleArea` is in units of spacing squared.
+ */
+export async function compileDrawPlan(asset, params = {}, opts = {}) {
+  const p = { outlineShare: DEFAULT_OUTLINE_SHARE, brushWidth: 3, fillBrushWidth: 14,
+              scribbleAngle: -45, orderStyle: 'natural', ...params };
+  const minArea = opts.minScribbleArea ?? MIN_SCRIBBLE_AREA;
+
+  // A centreline carries the thickness of the line it replaces, so the pen
+  // reproduces the original weight instead of a uniform brush. Contours have
+  // no meaningful width of their own and fall back to the brush.
+  const outline = orderStrokes(
+    asset.subpaths.map((s) => ({
+      ...s,
+      width: s.width ? Math.max(p.brushWidth, s.width) : p.brushWidth,
+    })),
+    { style: p.orderStyle, travelMinGap: p.brushWidth * 2 },
+  );
+
+  const fill = [];
+  const spacing = p.fillBrushWidth * 0.65;
+  // Fill in the same reading order the outline used, so colour arrives
+  // top-to-bottom rather than in whatever order the vectorizer emitted
+  // regions. Indices are kept for stable jitter seeds.
+  const regions = (asset.regions || [])
+    .map((region, i) => ({ region, i }))
+    .sort((a, b) => {
+      const ba = a.region.bbox || asset.bbox;
+      const bb = b.region.bbox || asset.bbox;
+      return (ba[1] - bb[1]) || (ba[0] - bb[0]);
+    });
+
+  // Regions that produced no scribble geometry at all still have to end up in
+  // the mask when `closeMask` is on. They ride along with the next stroke that
+  // did produce some, so every shape is owned by exactly one commit.
+  let pending = [];
+
+  regions.forEach(({ region, i }) => {
+    // Tiny regions can't hold even one scribble pass; filling them anyway
+    // turns the fill phase into thousands of one-frame twitches.
+    const tooSmall = bboxArea(region.bbox || asset.bbox) < minArea * spacing * spacing;
+    const { pts } = tooSmall ? { pts: [] } : scribbleRegion(region.rings, {
+      brushWidth: p.fillBrushWidth,
+      angleDeg: p.scribbleAngle,
+      // Jitter is baked here, at compile time, with a seed derived from
+      // stable identity -- the runtime never calls Math.random, which is
+      // what keeps renderFrame(t) reproducible.
+      seed: hashSeed(`${asset.id}:fill:${i}`),
+    });
+
+    if (pts.length >= 4) {
+      const stroke = makeStroke(pts, {
+        kind: 'FILL', width: p.fillBrushWidth, color: region.color, regionId: i,
+      });
+      if (opts.closeMask) {
+        stroke.closure = [...pending, { rings: region.rings }];
+        pending = [];
+      }
+      fill.push(stroke);
+    } else if (opts.closeMask) {
+      pending.push({ rings: region.rings });
+    }
+  });
+
+  // Nothing left to hand them to: the last stroke of the plan closes them.
+  if (pending.length) {
+    const last = fill[fill.length - 1] ?? outline[outline.length - 1];
+    if (last) last.closure = [...(last.closure || []), ...pending];
+  }
+
+  const strokes = [...outline, ...fill];
+  return {
+    strokes,
+    regions: asset.regions || [],
+    bbox: asset.bbox,
+    outlineShare: p.outlineShare,
+    phases: {
+      outline: makePhase(strokes, 0, outline.length, 'OUTLINE'),
+      fill: makePhase(strokes, outline.length, strokes.length, 'FILL'),
+    },
+  };
 }
 
 export const outlineFill = register({
@@ -90,65 +212,7 @@ export const outlineFill = register({
    * @param {{subpaths:Array, regions:Array, bbox:number[], id:string}} asset
    *   `subpaths` are outline contours; `regions` are {rings, color} for filling.
    */
-  async compile(asset, params = {}) {
-    const p = { outlineShare: DEFAULT_OUTLINE_SHARE, brushWidth: 3, fillBrushWidth: 14,
-                scribbleAngle: -45, orderStyle: 'natural', ...params };
-
-    // A centreline carries the thickness of the line it replaces, so the pen
-    // reproduces the original weight instead of a uniform brush. Contours have
-    // no meaningful width of their own and fall back to the brush.
-    const outline = orderStrokes(
-      asset.subpaths.map((s) => ({
-        ...s,
-        width: s.width ? Math.max(p.brushWidth, s.width) : p.brushWidth,
-      })),
-      { style: p.orderStyle, travelMinGap: p.brushWidth * 2 },
-    );
-
-    const fill = [];
-    const spacing = p.fillBrushWidth * 0.65;
-    // Fill in the same reading order the outline used, so colour arrives
-    // top-to-bottom rather than in whatever order the vectorizer emitted
-    // regions. Indices are kept for stable jitter seeds.
-    const regions = (asset.regions || [])
-      .map((region, i) => ({ region, i }))
-      .sort((a, b) => {
-        const ba = a.region.bbox || asset.bbox;
-        const bb = b.region.bbox || asset.bbox;
-        return (ba[1] - bb[1]) || (ba[0] - bb[0]);
-      });
-
-    regions.forEach(({ region, i }) => {
-      // Tiny regions can't hold even one scribble pass; filling them anyway
-      // turns the fill phase into thousands of one-frame twitches.
-      if (bboxArea(region.bbox || asset.bbox) < MIN_SCRIBBLE_AREA * spacing * spacing) return;
-      const { pts } = scribbleRegion(region.rings, {
-        brushWidth: p.fillBrushWidth,
-        angleDeg: p.scribbleAngle,
-        // Jitter is baked here, at compile time, with a seed derived from
-        // stable identity -- the runtime never calls Math.random, which is
-        // what keeps renderFrame(t) reproducible.
-        seed: hashSeed(`${asset.id}:fill:${i}`),
-      });
-      if (pts.length >= 4) {
-        fill.push(makeStroke(pts, {
-          kind: 'FILL', width: p.fillBrushWidth, color: region.color, regionId: i,
-        }));
-      }
-    });
-
-    const strokes = [...outline, ...fill];
-    return {
-      strokes,
-      regions: asset.regions || [],
-      bbox: asset.bbox,
-      outlineShare: p.outlineShare,
-      phases: {
-        outline: makePhase(strokes, 0, outline.length, 'OUTLINE'),
-        fill: makePhase(strokes, outline.length, strokes.length, 'FILL'),
-      },
-    };
-  },
+  compile: (asset, params = {}) => compileDrawPlan(asset, params),
 
   /**
    * @param {import('../render/surfaces.js').ClipSurfaces} sf
@@ -194,9 +258,11 @@ export const outlineFill = register({
     const st = plan.strokes[at.strokeIndex];
     if (!st.lift) {
       const ctx = layer.active.ctx;
-      // The region clip belongs on the mask, not on `reveal` and not on the
-      // page: clipping downstream applies antialiasing twice and leaves a
-      // visibly thin dark rim at 1080p.
+      // The scribble is drawn unclipped and allowed to overshoot its region.
+      // Clipping it would have to happen here, on the mask -- doing it
+      // downstream on `reveal` or on the page applies antialiasing twice and
+      // leaves a visibly thin dark rim at 1080p -- but it is not needed at all:
+      // past the edge of the shape there is no artwork for the spill to reveal.
       applyBrush(ctx, st, layer === sf.fill ? '#ffffff' : undefined);
       strokePartial(ctx, st, at.vertex, at.frac);
     }
