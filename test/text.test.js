@@ -388,3 +388,23 @@ test('the hand holds its pose instead of rocking about the nib', { skip: !font }
   for (let i = 0; i <= 200; i++) angles.add(textReveal.advance(sf, plan, i / 200).tangent);
   assert.deepEqual([...angles], [0], 'the pen angle must not vary with the sweep');
 });
+
+test('reveal travel path bulges during gaps and line breaks', { skip: !font }, async () => {
+  const out = outlineText(font, 'Hi\nthere', { fontSize: 100 });
+  const plan = await textReveal.compile({ id: 't1', layout: out });
+
+  // Find the line break transition segment index
+  const lineBreakSegIndex = plan.segments.findIndex((s) => !s.ink && s.y0 !== s.y1);
+  assert.ok(lineBreakSegIndex !== -1, 'must have a line break travel segment');
+  
+  // Sample frames within that transition segment
+  const seg = plan.segments[lineBreakSegIndex];
+  let startS = 0;
+  for (let i = 0; i < lineBreakSegIndex; i++) startS += plan.segments[i].len;
+  
+  const midAt = locateFrontier(plan.segments, startS + seg.len / 2);
+  
+  // The midpoint of the travel between lines must be bulged (smaller Y means higher up on screen)
+  const expectedLinearY = (seg.y0 + seg.y1) / 2;
+  assert.ok(midAt.y < expectedLinearY - 5, 'midpoint of line break should be bulged upward');
+});

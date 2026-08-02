@@ -29,6 +29,13 @@ export function drawHand(ctx, style, tip, tangent, frame, resolveImage) {
   ctx.rotate(sol.rotation + (style.naturalAngleDeg ?? 0) * DEG * 0);
   ctx.scale(sol.scale, sol.scale);
 
+  // Add a soft hand shadow cast to the bottom-right (light source from top-left)
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.2)';
+  ctx.shadowBlur = 45;
+  // Offset to the right (12px) and slightly down (8px) in coordinate space
+  ctx.shadowOffsetX = 40;
+  ctx.shadowOffsetY = 14;
+
   if (sol.stretchPx > 0 && style.stretchBand) {
     // Lengthen the forearm rather than inflating the whole sprite. The band is
     // a near-uniform stretch of arm, so scaling only those rows is invisible,
