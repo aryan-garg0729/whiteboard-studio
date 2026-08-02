@@ -31,8 +31,15 @@ import { easeEnds } from './outlineFill.js';
  */
 const OSCILLATION_PERIOD = 0.55;
 
-/** How much of the line band the hand sweeps, as a fraction of its height. */
-const OSCILLATION_REACH = 0.42;
+/**
+ * How far the hand swings either side of the line's middle, as a fraction of
+ * the band height. The full sweep is twice this.
+ *
+ * Exported because it is the only honest thing to write a test against: the
+ * assertion is that the hand moves about as far as this says, not that it
+ * clears some number chosen when the constant happened to be larger.
+ */
+export const OSCILLATION_REACH = 0.105;
 
 /**
  * Width of the pen's loop, as a multiple of the forward travel per radian.
@@ -60,7 +67,7 @@ const LOOP_SLANT = -0.34;
  * irrational-ish so the variation never lines up with the loop and the pattern
  * does not visibly repeat.
  */
-const LOOP_VARY = 0.17;
+export const LOOP_VARY = 0.17;
 const LOOP_VARY_RATE = 0.37;
 
 /** Ragged-edge amplitude, as a fraction of the band height. */
@@ -293,8 +300,8 @@ export const textReveal = register({
     // closes it; together they trace an ellipse that drifts forward with the
     // frontier, which is the path a hand takes writing `eee`. The slant term
     // shears that ellipse so it leans into the direction of travel.
-    const vary = (1 - LOOP_VARY + LOOP_VARY * Math.sin(theta * LOOP_VARY_RATE + phase))*0.5;
-    const dy = 0.5*b.height * OSCILLATION_REACH * vary * Math.cos(theta);
+    const vary = 1 - LOOP_VARY + LOOP_VARY * Math.sin(theta * LOOP_VARY_RATE + phase);
+    const dy = b.height * OSCILLATION_REACH * vary * Math.cos(theta);
     const dx = (period / TAU) * LOOP_GAIN * Math.sin(theta) + LOOP_SLANT * dy;
 
     return {

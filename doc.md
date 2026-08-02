@@ -66,6 +66,7 @@ src/
       text.js        #   opentype.js layout + glyph stroke ordering/orientation
     anim/
       registry.js    #   AnimationType plugin registry; PenState contract
+      appear.js      #   entrances: instant/fade/pop/slide, no pen at all
       imageReveal.js #   images: the pen reveals the real artwork (the default)
       outlineFill.js #   images: outline pass, then zig-zag colour pass (legacy)
       handwrite.js   #   text: centreline strokes
@@ -198,6 +199,8 @@ mode (`showHand: false`) draws no sprite at all.
 | Raster vectorization | Line-art/photo classification, k-means in Lab, `RETR_CCOMP` even-odd rings; **thin clusters become centrelines, not contours** |
 | Text write (default) | `draw.textReveal` — real filled letterforms revealed left to right under an oscillating hand, word by word. `outlineText()` keeps the glyph outline opentype already has, so **text needs no sidecar at all** and is instant |
 | Image drawing | `draw.imageReveal` — the pen paints a mask and `composite()` shows the real artwork through it, so what is drawn *is* the asset. Each region closes with its own polygon as its scribble finishes, so no coverage hole can survive; `settles: false`, because there is nothing to change into |
+| Entrances | `appear.instant` / `fade` / `pop` / `slide` for every asset kind — the mask is filled whole and the entrance is an opacity/offset/scale applied at **blit** time (`AnimationType.present`), because the surfaces only extend 32px past the drawable and a pop would clip itself |
+| Clip params | The Inspector renders the selected animation's `paramSchema` generically, so an animation declares what it needs (slide direction, pen width, scribble angle) instead of growing bespoke controls |
 | Text handwriting | `draw.handwrite` — opentype.js layout + skeletonized centrelines, role-based stroke order. Still selectable, and still what every pre-existing project uses |
 | SVG import | Shapes, groups, nested transforms, style/presentation attrs, fill→region, holes |
 | App shell | Electron + React; library, stage, inspector, timeline. Commands live in the **real application menu** (`buildMenu` in `electron/main.js`) and reach the renderer over `menu:command`; the in-app row keeps only the brand, the click-to-rename project title, undo/redo and Export |
@@ -658,6 +661,7 @@ everything to them.
 | `erase.test.js` | Ink extent, sweep direction, the `used` flag, degenerate plans |
 | `export.test.js` | ffmpeg args and audio filter graph |
 | `imageReveal.test.js` | The finished frame equals the artwork, no gap survives at u=1, nothing changes when the pen stops, closure is progressive, shared-layer scrub-back |
+| `appear.test.js` | Entrances reveal everything at once, never ask for a hand, ramp opacity monotonically to exactly 1, land on true size/position, freeze after the clip, and still erase |
 | `artAlpha.test.js` | The paper ramp, saturated pales, alpha multiplied not replaced, and the putImageData/CTM trap |
 | `text.test.js` | Glyph key stability, role classification, stroke orientation and ordering, the reveal's frontier and mask (last letter whole at `u=1`, no scanline un-reveals) |
 | `project.test.js` | Schema defaults, validation paths, duration maths, the bundled example |

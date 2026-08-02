@@ -26,6 +26,10 @@
  * @property {(surfaces:Object, plan:Object, u:number, prev:number) => PenState} advance
  *   incremental raster work for normalised progress u; returns where the pen is
  * @property {(surfaces:Object) => any} [composite] override layer stacking
+ * @property {(plan:Object, u:number, params:Object) => {alpha?:number, scale?:number,
+ *            dx?:number, dy?:number}} [present] how the finished clip enters the
+ *   frame -- opacity and an offset/scale about its centre, applied at blit time.
+ *   Absent means it simply appears where it is, fully opaque.
  * @property {boolean} [settles] false when the clip is already showing the real
  *   artwork and must not crossfade to it when the draw ends. Absent means true,
  *   which is right for anything that draws a pen-ink surrogate.

@@ -10,7 +10,9 @@ import {
 } from '../src/engine/compile/text.js';
 import { setSurfaceFactory, ClipSurfaces } from '../src/engine/render/surfaces.js';
 import { compileErase, hasInk } from '../src/engine/anim/erase.js';
-import textReveal, { buildSegments, locateFrontier } from '../src/engine/anim/textReveal.js';
+import textReveal, {
+  buildSegments, locateFrontier, OSCILLATION_REACH, LOOP_VARY,
+} from '../src/engine/anim/textReveal.js';
 import { easeEnds } from '../src/engine/anim/outlineFill.js';
 
 const stroke = (pts, length) => ({ pts, length: length ?? pts.length * 10 });
@@ -242,7 +244,27 @@ test('the hand oscillates rather than tracking the baseline', { skip: !font }, a
   for (let i = 0; i <= 200; i++) ys.push(textReveal.advance(sf, plan, i / 200).y);
   const span = Math.max(...ys) - Math.min(...ys);
   const band = out.lines[0].y1 - out.lines[0].y0;
-  assert.ok(span > band * 0.5, `hand barely moved: ${span.toFixed(0)} over a ${band.toFixed(0)} band`);
+
+  // Two separate claims, because either one alone is worthless here.
+  //
+  // First: the sweep is what `OSCILLATION_REACH` advertises, either side of the
+  // middle and scaled per loop by `1 ± LOOP_VARY`. This is what catches a bare
+  // factor being slipped into `advance` -- exactly how the reach silently
+  // became a quarter of what the constant claimed. Retuning the constant moves
+  // this bound with it, which is the point.
+  const reach = band * OSCILLATION_REACH * 2;
+  assert.ok(span > reach * (1 - LOOP_VARY) * 0.9 && span < reach * (1 + LOOP_VARY) * 1.1,
+    `hand swept ${span.toFixed(1)}, but the constants ask for about ${reach.toFixed(1)}`);
+
+  // Second: absolute bounds, so retuning the constant cannot quietly tune the
+  // *feature* away. Below a tenth of the band the jiggle stops reading as
+  // writing at all; past half of it the hand is flailing above and below the
+  // line rather than working along it. Deliberately wide -- this is a sanity
+  // floor and ceiling, not a second opinion about the right amplitude.
+  assert.ok(span > band * 0.08,
+    `hand barely moved: ${span.toFixed(1)} over a ${band.toFixed(0)} band`);
+  assert.ok(span < band * 0.6,
+    `hand swept ${span.toFixed(1)}, most of a ${band.toFixed(0)} band`);
 
   // Several up-down cycles, not one slow drift: count sign changes.
   let turns = 0;

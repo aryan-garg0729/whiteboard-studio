@@ -118,12 +118,14 @@ export async function prepareProject(project, projectPath, sidecar) {
         color: asset.color,
       };
 
-      // The two text animations want completely different geometry, so the
-      // branch is on the clip's animation rather than on the asset kind. The
-      // reveal keeps the filled letterform and therefore never needs a
-      // centreline -- which means no sidecar round trip, and adding text is
-      // instant instead of one rasterise-and-skeletonise per distinct glyph.
-      if (clip.animId === 'draw.textReveal') {
+      // The text animations want completely different geometry, so the branch
+      // is on the clip's animation rather than on the asset kind: filled
+      // letterforms unless the clip is actually handwriting them. The
+      // reveal needs the outline, and so does every entrance -- an appearing
+      // caption has artwork to show and no centreline to trace, and asking the
+      // sidecar to skeletonise glyphs it will never draw costs a round trip per
+      // distinct glyph for nothing.
+      if (clip.animId !== 'draw.handwrite') {
         const layout = outlineText(font, asset.text, opts);
         prepared[clip.id] = {
           kind: 'text',

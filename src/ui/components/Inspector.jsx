@@ -4,6 +4,7 @@ import { cameraAt } from '../../engine/render/renderFrame.js';
 import { localToWorld } from '../stageGeom.js';
 import { Field, Group, Icon, Num, PATH, Soon } from './common.jsx';
 import FontPicker from './FontPicker.jsx';
+import { getAnimation } from '../../engine/anim/registry.js';
 
 /**
  * Breathing room left around a clip by "Zoom to selection", as a multiple of
@@ -16,7 +17,51 @@ const ANIMATION_LABELS = {
   'draw.outlineFill': 'Outline, then colour (legacy)',
   'draw.textReveal': 'Write (letters appear)',
   'draw.handwrite': 'Trace letterforms',
+  'appear.instant': 'Appear (instantly)',
+  'appear.fade': 'Appear (fade in)',
+  'appear.pop': 'Appear (pop in)',
+  'appear.slide': 'Appear (slide in)',
 };
+
+/**
+ * The selected animation's own settings.
+ *
+ * Every animation has always declared a `paramSchema` and nothing ever rendered
+ * it, so pen width, fill brush, scribble angle and draw order were unreachable
+ * from the app -- and a new animation could not take a setting at all without
+ * growing its own control. Driving the controls from the schema means an
+ * animation declares what it needs and the Inspector shows it.
+ */
+function AnimParams({ ed, clip }) {
+  let schema;
+  try {
+    schema = getAnimation(clip.animId).paramSchema;
+  } catch {
+    return null;                    // an id this build does not know: say nothing
+  }
+  const entries = Object.entries(schema || {});
+  if (!entries.length) return null;
+
+  const set = (key, value) =>
+    ed.patchClip(clip.id, { params: { ...(clip.params || {}), [key]: value } });
+  const valueOf = (key, spec) => clip.params?.[key] ?? spec.default;
+
+  return entries.map(([key, spec]) => (
+    <Field key={key} label={spec.label || key}>
+      {spec.type === 'enum' ? (
+        <select value={valueOf(key, spec)} onChange={(e) => set(key, e.target.value)}>
+          {spec.options.map((o) => <option key={o} value={o}>{o}</option>)}
+        </select>
+      ) : spec.type === 'color' ? (
+        <input type="color" value={valueOf(key, spec)}
+               onChange={(e) => set(key, e.target.value)} />
+      ) : (
+        <Num value={valueOf(key, spec)} min={spec.min} max={spec.max} step={spec.step}
+             onChange={(v) => set(key, v)} />
+      )}
+    </Field>
+  ));
+}
 
 const TRANSITION_LABELS = [
   ['swipeLeft', 'Swipe left'],
@@ -72,6 +117,7 @@ function ClipInspector({ ed, clip, asset, fonts, frame, fps, selection, bboxes }
             handwriting — “Write” draws the real letterforms instead.
           </div>
         )}
+        <AnimParams ed={ed} clip={clip} />
         <TrackField tracks={ed.doc.tracks} kind="clip" value={clip.trackId}
           onChange={(trackId) => ed.patchClip(clip.id, { trackId })} />
         <Field label="Page">

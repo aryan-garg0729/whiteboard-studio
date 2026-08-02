@@ -17,6 +17,7 @@ import { knockOutPaper, wantsPaperKnockout } from '../engine/render/artAlpha.js'
 // `getAnimation` can only hand back what has been registered.
 import outlineFill from '../engine/anim/outlineFill.js';
 import imageReveal from '../engine/anim/imageReveal.js';
+import appear, { isAppear } from '../engine/anim/appear.js';
 import handwrite from '../engine/anim/handwrite.js';
 import textReveal from '../engine/anim/textReveal.js';
 
@@ -61,15 +62,21 @@ export async function buildSession(loaded) {
     let plan;
 
     if (p.kind === 'text' && p.mode === 'reveal') {
-      plan = await textReveal.compile({
-        id: clip.id,
-        layout: {
-          lines: p.lines,
-          bbox: p.bbox,
-          inkBbox: p.inkBbox,
-          penWidth: p.penWidth,
-        },
-      });
+      // Both the reveal and the entrances draw filled letterforms; only the
+      // reveal needs the line/span layout to walk a frontier along.
+      plan = isAppear(clip.animId)
+        ? await getAnimation(clip.animId).compile({
+          id: clip.id, bbox: p.bbox, inkBbox: p.inkBbox, penWidth: p.penWidth,
+        })
+        : await textReveal.compile({
+          id: clip.id,
+          layout: {
+            lines: p.lines,
+            bbox: p.bbox,
+            inkBbox: p.inkBbox,
+            penWidth: p.penWidth,
+          },
+        });
       // The reveal is a mask, so unlike handwriting it needs artwork underneath
       // to reveal -- the filled letterforms.
       artJobs.push({ clipId: clip.id, prepared: p });
@@ -91,8 +98,10 @@ export async function buildSession(loaded) {
         })),
       };
       // Dispatch on the clip's own animation rather than assuming outlineFill:
-      // an image can now also be drawn by revealing the artwork itself.
+      // an image can now be revealed under the pen, or simply appear.
       plan = await getAnimation(clip.animId ?? 'draw.outlineFill').compile(asset, {
+        // Pen widths are chosen so the stroke is a constant width *on screen*.
+        // An entrance has no pen and ignores them.
         brushWidth: Math.max(1.5, 2.4 / clip.transform.scale),
         fillBrushWidth: Math.max(8, 15 / clip.transform.scale),
         ...clip.params,

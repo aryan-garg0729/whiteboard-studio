@@ -226,6 +226,22 @@ export function renderPage(session, project, pageId, t, ctx, opts) {
     ctx.translate(tr.x, tr.y);
     if (tr.rotation) ctx.rotate(tr.rotation);
     ctx.scale(tr.scale, tr.scale);
+
+    // An entrance -- a fade, a pop, a slide -- is applied here rather than
+    // drawn into the surface, because the surface only extends 32px past the
+    // drawable and a clip that scales up or slides in would be clipped by its
+    // own canvas. It acts about the drawable's centre so a pop grows evenly
+    // instead of drifting off its anchor.
+    const enter = anim.present?.(plan, u, clip.params ?? {});
+    if (enter) {
+      const b = plan.bbox;
+      const cx = (b[0] + b[2]) / 2;
+      const cy = (b[1] + b[3]) / 2;
+      ctx.translate(cx + (enter.dx ?? 0), cy + (enter.dy ?? 0));
+      if (enter.scale != null) ctx.scale(enter.scale, enter.scale);
+      ctx.translate(-cx, -cy);
+      ctx.globalAlpha = enter.alpha ?? 1;
+    }
     ctx.drawImage(out, sf.originX, sf.originY);
     ctx.restore();
 

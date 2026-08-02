@@ -27,7 +27,11 @@ export const ASSET_KINDS = new Set(['image', 'vector', 'text']);
 /** Animation ids that ship today. Kept as data so the check stays honest. */
 export const KNOWN_ANIMATIONS = new Set([
   'draw.imageReveal', 'draw.outlineFill', 'draw.textReveal', 'draw.handwrite',
+  'appear.instant', 'appear.fade', 'appear.pop', 'appear.slide',
 ]);
+
+/** Entrances: no pen, no drawing, so they suit every asset kind alike. */
+const APPEAR = ['appear.instant', 'appear.fade', 'appear.pop', 'appear.slide'];
 
 /**
  * Which animations suit which asset kind.
@@ -39,9 +43,9 @@ export const KNOWN_ANIMATIONS = new Set([
 export const ANIMATIONS_FOR_KIND = {
   // Reveal first: it is the default for anything new, and `draw.outlineFill`
   // is kept only so projects authored against it keep looking the way they did.
-  image: ['draw.imageReveal', 'draw.outlineFill'],
-  vector: ['draw.imageReveal', 'draw.outlineFill'],
-  text: ['draw.textReveal', 'draw.handwrite'],
+  image: ['draw.imageReveal', 'draw.outlineFill', ...APPEAR],
+  vector: ['draw.imageReveal', 'draw.outlineFill', ...APPEAR],
+  text: ['draw.textReveal', 'draw.handwrite', ...APPEAR],
 };
 
 /** What a timeline track can hold. */

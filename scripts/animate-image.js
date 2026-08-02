@@ -56,7 +56,11 @@ const ERASE = Number(arg('--erase', 0)); // seconds of erase after the draw
 // `imageReveal` shows the real artwork under the pen; `outlineFill` draws a
 // pen-ink stand-in and crossfades to it. Both are kept runnable from here
 // because the difference between them is the thing worth looking at.
-const ANIM = `draw.${arg('--anim', 'imageReveal')}`;
+// A bare name is one of the pen animations, since that is what this script is
+// mostly for; anything with a dot is passed through as a full id, so
+// `--anim appear.fade` works too.
+const ANIM_ARG = arg('--anim', 'imageReveal');
+const ANIM = ANIM_ARG.includes('.') ? ANIM_ARG : `draw.${ANIM_ARG}`;
 const OUT = resolve(ROOT, arg('--out', `${basename(IMAGE).replace(/\.[^.]+$/, '')}.mp4`));
 
 async function main() {
@@ -109,8 +113,10 @@ async function main() {
   });
   session.plans.set('c1', plan);
   if (ERASE) session.erasePlans.set('c1', compileErase(plan, { id: 'c1' }));
-  console.log(`plan: ${plan.phases.outline.i1} outline strokes, `
-            + `${plan.strokes.length - plan.phases.outline.i1} fill strokes`);
+  console.log(plan.strokes.length
+    ? `plan: ${plan.phases.outline.i1} outline strokes, `
+      + `${plan.strokes.length - plan.phases.outline.i1} fill strokes`
+    : `plan: ${ANIM}, nothing to draw -- the artwork simply arrives`);
 
   const canvas = createCanvas(WIDTH, HEIGHT);
   const ctx = canvas.getContext('2d');

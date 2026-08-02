@@ -31,6 +31,7 @@ import { knockOutPaper, wantsPaperKnockout } from '../src/engine/render/artAlpha
 // has been registered.
 import outlineFill from '../src/engine/anim/outlineFill.js';
 import imageReveal from '../src/engine/anim/imageReveal.js';
+import appear, { isAppear } from '../src/engine/anim/appear.js';
 import handwrite from '../src/engine/anim/handwrite.js';
 import textReveal from '../src/engine/anim/textReveal.js';
 
@@ -101,10 +102,16 @@ async function buildTextClip(session, sidecar, project, clip, asset) {
   };
 
   // Same branch as electron/prepare.js, and it has to stay that way: preview and
-  // export must build byte-identical plans from the same document.
-  if (clip.animId === 'draw.textReveal') {
+  // export must build byte-identical plans from the same document. Filled
+  // letterforms for everything except handwriting.
+  if (clip.animId !== 'draw.handwrite') {
     const layout = outlineText(font, asset.text, opts);
-    return { plan: await textReveal.compile({ id: clip.id, layout }), layout, vector: layout };
+    const plan = isAppear(clip.animId)
+      ? await getAnimation(clip.animId).compile({
+        id: clip.id, bbox: layout.bbox, inkBbox: layout.inkBbox, penWidth: opts.penWidth,
+      })
+      : await textReveal.compile({ id: clip.id, layout });
+    return { plan, layout, vector: layout };
   }
 
   const layout = await layoutText(font, asset.text, {
