@@ -77,7 +77,7 @@ async function buildImageClip(session, sidecar, project, clip, asset) {
 }
 
 async function buildTextClip(session, sidecar, project, clip, asset) {
-  const fontPath = rel(asset.font || '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf');
+  const fontPath = rel(asset.font || join(ROOT, 'assets/fonts/Caveat.ttf'));
   const buf = readFileSync(fontPath);
   // loadSync is deprecated in opentype.js and silently returns undefined.
   const font = opentype.parse(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));

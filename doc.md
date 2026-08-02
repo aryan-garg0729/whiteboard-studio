@@ -5,7 +5,7 @@ timeline; export a hand-drawn-on-whiteboard video at 1080p. Requirements are in
 [`req.md`](req.md).
 
 **State: the rendering engine is complete, and the editor is usable end to end.**
-Import artwork or audio, add text in any installed font, arrange clips on a drag-and-drop
+Import artwork or audio, add text in one of nine bundled faces, arrange clips on a drag-and-drop
 timeline, position and resize clips directly on the canvas, and export MP4 — all from the
 app. Multiple pages with swipe transitions work, including returning to a filled page and
 drawing on it again. Camera keyframes are still document-only. 168 tests pass.
@@ -201,7 +201,7 @@ mode (`showHand: false`) draws no sprite at all.
 | Project name | `meta.name`, independent of the filename so it survives Save As; falls back to the filename, then "Untitled", and mirrors into the window title |
 | Asset placement | Click-added assets are centred on the **camera's** framing and shrunk to fit if oversized (`placeInFrame`, `src/ui/stageGeom.js`); a stage drop still lands under the cursor |
 | Asset import | File dialog and drag-and-drop (with a byte-copy fallback when a dropped file has no path); ffprobe duration, waveform peaks, thumbnails |
-| Font picker | System enumeration via fontconfig, **filtered to faces opentype.js can parse**, script-like families first |
+| Font picker | Nine faces **bundled in `assets/fonts/`** (manifest `fonts.json`), handwriting first, each row set in its own type via the FontFace API over `fonts:read` |
 | Timeline | Named tracks with clips auto-packed into shared lanes, drag to move (horizontally to retime, vertically to re-lane), edge-resize, snapping, ruler scrub, audio waveforms |
 | Audio preview | WebAudio mixes the tracks live and is the master clock, so the drawing cannot drift from narration; per-lane and master mute are monitoring-only and never reach the document |
 | Inspector | Clip timing/transform/erase, text and asset params, composition settings |
@@ -489,6 +489,22 @@ regression test.
     rAF that never resolved, and — once raced against a timeout — produced screenshots of
     the app as it looked *before* anything loaded, which reads as a pass. Trust the
     script's DOM assertions; the screenshot is best-effort.
+32. **The last letter of a text clip stayed chewed.** `textReveal` gives the word being
+    written a ragged right edge and everything behind the frontier a square one — but the
+    frontier never rolls past the final segment, so at `u = 1` the last word was still the
+    "in progress" one and kept a permanent bite up to `EDGE_WOBBLE` (4.5% of the band, ~4px
+    at 120px) out of its rightmost stem. On a `d` that is most of the stem. `locateFrontier`
+    now reports `frac`, and only `frac < 1` is ragged. The wobble was also a function of
+    `x`, which slid the comb along as the frontier advanced and un-revealed ink; it is now a
+    function of `y` alone and only ever lags the frontier, never leads it — leading rows
+    jump backwards the instant the edge squares off.
+33. **System font enumeration cannot promise a handwriting face.** A stock Linux box lists
+    a couple of hundred families (223 here) and not one script face among them, which is the
+    only category that matters for a whiteboard tool — and a project authored against
+    `/usr/share/fonts/...` writes in something else, or fails, on the next machine. The
+    picker now offers nine bundled faces and nothing else. Note opentype.js rejects some
+    otherwise fine Google faces (Roboto and Lora both throw `lookupType: 6 substFormat: 2`),
+    so anything added to the manifest must clear `isUsable()`.
 
 ### Subtle invariants worth preserving
 
@@ -519,6 +535,8 @@ regression test.
   under the cursor will otherwise be re-entered by Chromium's synthetic `pointermove`.
 - **Selection UI is DOM, not canvas.** `renderFrame` owns every exported pixel, so a
   handle drawn into the canvas could leak into an export. `StageOverlay` cannot.
+- **The reveal mask may never retreat, per scanline.** A monotonic frontier is not enough:
+  any ragged edge must be a function of `y` alone and must lag, or ink un-draws itself.
 
 ---
 
@@ -596,7 +614,7 @@ everything to them.
 | `surfaces.test.js` | Layer reset semantics, origin-aware clearing, empty-mask compositing |
 | `erase.test.js` | Ink extent, sweep direction, the `used` flag, degenerate plans |
 | `export.test.js` | ffmpeg args and audio filter graph |
-| `text.test.js` | Glyph key stability, role classification, stroke orientation and ordering |
+| `text.test.js` | Glyph key stability, role classification, stroke orientation and ordering, the reveal's frontier and mask (last letter whole at `u=1`, no scanline un-reveals) |
 | `project.test.js` | Schema defaults, validation paths, duration maths, the bundled example |
 | `svg.test.js` | Shapes, transforms, fill inheritance, viewBox, rings/holes, .svg routing |
 | `prepare.test.js` | The IPC boundary: payload is JSON-safe and sufficient to rebuild plans |
@@ -605,7 +623,9 @@ everything to them.
 
 UI behaviour is checked headlessly with `WB_SMOKE_SCRIPT`, which evaluates an interaction
 script in the renderer (click through tabs, add a clip, drag it, resize it, undo) and
-prints what changed. Assert against `window.__studioState()` — a read-only view of the
+prints what changed. `scripts/smoke/font-picker.js` checks the Text tab the same way --
+a face whose bytes never load falls back to the UI font and still *looks* like a fine row,
+so it asserts every row's computed family is the loaded one. Assert against `window.__studioState()` — a read-only view of the
 document, selection and frame — rather than scraping input values, which lag a commit
 boundary behind. The pointer-capture, unparseable-font, resize-feedback and
 double-prepare bugs were all caught this way; none is reachable from a unit test.

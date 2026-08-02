@@ -43,7 +43,7 @@ const FPS = 30;
 
 const IMAGE = resolve(arg('--image', join(ROOT, 'assets/demo/lineart.png')));
 const TEXT = arg('--text', 'Fresh coffee');
-const FONT = arg('--font', '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf');
+const FONT = arg('--font', join(ROOT, 'assets/fonts/Caveat.ttf'));
 const HAND = arg('--hand', 'hand1');
 const SHOW_HAND = !flag('--no-hand');
 const FRAMES_ONLY = flag('--frames-only');

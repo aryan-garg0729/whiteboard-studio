@@ -13,7 +13,8 @@
  */
 
 import { readFileSync } from 'node:fs';
-import { dirname, isAbsolute, resolve } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import opentype from 'opentype.js';
 
 import { parseSvg } from '../src/engine/compile/svgDoc.js';
@@ -21,6 +22,16 @@ import { layoutText, outlineText } from '../src/engine/compile/text.js';
 import { styleIdsFor } from '../src/engine/hand/styles.js';
 
 const arr = (a) => (Array.isArray(a) ? a : Array.from(a));
+
+/**
+ * The face a text asset falls back to.
+ *
+ * A bundled one, not a system path: the old default (DejaVu Sans) only exists
+ * on Linux, and a project that renders on the author's box and dies on anyone
+ * else's is worse than no default at all.
+ */
+const DEFAULT_FONT = join(dirname(fileURLToPath(import.meta.url)),
+  '..', 'assets', 'fonts', 'Caveat.ttf');
 
 const MIME = {
   png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
@@ -81,7 +92,7 @@ export async function prepareProject(project, projectPath, sidecar) {
       const traced = await sidecar.vectorize(rel(asset.src), asset.trace || {});
       prepared[clip.id] = serializeDrawable(traced, dataUrl(rel(asset.src)));
     } else {
-      const fontPath = rel(asset.font || '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf');
+      const fontPath = rel(asset.font || DEFAULT_FONT);
       const buf = readFileSync(fontPath);
       let font;
       try {

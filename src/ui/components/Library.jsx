@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import { Field, Group, Icon, Num, PATH, Soon } from './common.jsx';
 
 const TABS = [
@@ -77,13 +77,6 @@ function MediaTab({ library, onImport, onPlace, onAddAudio, onRemove }) {
 }
 
 function TextTab({ fonts, draft, setDraft, onAdd }) {
-  const [filter, setFilter] = useState('');
-  const shown = useMemo(() => {
-    const q = filter.trim().toLowerCase();
-    const list = q ? fonts.filter((f) => f.family.toLowerCase().includes(q)) : fonts;
-    return list.slice(0, 300);
-  }, [fonts, filter]);
-
   return (
     <div className="lib-section" style={{ borderBottom: 0 }}>
       <Field label="Text" stack>
@@ -95,31 +88,29 @@ function TextTab({ fonts, draft, setDraft, onAdd }) {
         />
       </Field>
 
+      {/* A short curated set, not the machine's font book: a couple of hundred
+          system families is a search problem, and none of them writes by hand.
+          Each name is set in its own face -- the name alone tells you nothing
+          about how the letters will look, which is what you are choosing. */}
       <Field label="Font" stack>
-        <input
-          type="text"
-          placeholder={`Search ${fonts.length} fonts…`}
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          onKeyDown={(e) => e.stopPropagation()}
-        />
+        <div className="font-list">
+          {fonts.map((f) => (
+            <button
+              key={f.path}
+              aria-selected={draft.font === f.path}
+              title={f.family}
+              style={f.cssFamily ? { fontFamily: `"${f.cssFamily}"` } : undefined}
+              onClick={() => setDraft({ ...draft, font: f.path, fontFamily: f.family })}
+            >
+              <span className="font-name">{f.family}</span>
+              {/* Skeletonising a modulated face gives lumpy centrelines; the
+                  script-like families are the ones that read as handwriting. */}
+              {f.hand && <span className="hand-tag">script</span>}
+            </button>
+          ))}
+          {fonts.length === 0 && <div className="lib-hint">No fonts available</div>}
+        </div>
       </Field>
-      <div className="font-list">
-        {shown.map((f) => (
-          <button
-            key={f.path}
-            aria-selected={draft.font === f.path}
-            title={f.path}
-            onClick={() => setDraft({ ...draft, font: f.path, fontFamily: f.family })}
-          >
-            {f.family}
-            {/* Skeletonising a modulated face gives lumpy centrelines; the
-                script-like families are the ones that read as handwriting. */}
-            {f.hand && <span className="hand-tag">script</span>}
-          </button>
-        ))}
-        {shown.length === 0 && <div className="lib-hint">No match</div>}
-      </div>
 
       <div className="pair">
         <Field label="Size">

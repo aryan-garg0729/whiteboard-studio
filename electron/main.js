@@ -15,14 +15,14 @@ import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { normalizeProject, projectFrames } from '../src/engine/model/project.js';
 import { HAND_STYLE_IDS } from '../src/engine/hand/styles.js';
 import { Sidecar } from '../src/engine/sidecar/client.js';
 import { prepareProject, prepareHand } from './prepare.js';
-import { listFonts } from './fonts.js';
+import { bundledFontPath, listFonts } from './fonts.js';
 import { describeFile, hasFfmpeg, AUDIO_EXT, IMAGE_EXT } from './media.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -307,6 +307,23 @@ ipcMain.handle('audio:read', (_e, path) => {
 
 ipcMain.handle('fonts:list', () => {
   try { return listFonts(); } catch { return []; }
+});
+
+/**
+ * Raw bytes of a bundled face, so the picker can draw each name in its own type.
+ *
+ * Same reason as audio:read -- the renderer has no filesystem and cannot fetch
+ * `file://` -- but this one is deliberately not a general file read. It resolves
+ * the basename inside assets/fonts and nothing else, so a compromised renderer
+ * cannot walk out of it with `../`.
+ */
+ipcMain.handle('fonts:read', (_e, path) => {
+  try {
+    const p = bundledFontPath(basename(String(path)));
+    return p ? readFileSync(p) : asError(new Error('not a bundled font'));
+  } catch (err) {
+    return asError(err);
+  }
 });
 
 // Drawing hands only. The eraser is a tool style loaded alongside whichever of

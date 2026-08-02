@@ -1,63 +1,39 @@
 /**
- * System font discovery.
+ * The faces the Text tab offers.
  *
- * Handwriting quality depends on the face: skeletonising a modulated serif
- * gives lumpy centrelines, so the picker reports each face's monoline-ness and
- * the UI can steer users toward the good ones.
+ * These are bundled with the app rather than discovered on the machine. Font
+ * enumeration sounds friendlier -- use whatever the user already has -- but a
+ * stock Linux box lists a couple of hundred families of which none is a
+ * handwriting face, and handwriting is the whole point here: skeletonising a
+ * modulated serif gives lumpy centrelines, while a script face reads as writing.
+ * A fixed set also means a project opened elsewhere writes in the face it was
+ * authored in, which a path into /usr/share/fonts cannot promise.
  *
- * fc-list is the reliable enumerator on Linux; the directory walk is a fallback
- * for boxes without fontconfig.
+ * `assets/fonts/fonts.json` is the manifest, and its order is the picker's
+ * order. See the README beside it for what is in the set and why.
  */
 
-import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import { extname, join } from 'node:path';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import opentype from 'opentype.js';
 
-const FONT_DIRS = [
-  '/usr/share/fonts',
-  '/usr/local/share/fonts',
-  join(process.env.HOME || '', '.local/share/fonts'),
-  join(process.env.HOME || '', '.fonts'),
-];
+const FONT_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'assets', 'fonts');
 
-/** Faces whose names suggest a script/handwriting design, surfaced first. */
-const HAND_HINT = /(hand|script|comic|caveat|indie|patrick|shadows|gloria|architect|marker|brush|casual|dancing|kalam|neucha)/i;
-
-function viaFontconfig() {
-  const out = execFileSync('fc-list', ['--format', '%{file}\t%{family[0]}\t%{style[0]}\n'],
-    { encoding: 'utf8', maxBuffer: 8 << 20 });
-  return out.split('\n').filter(Boolean).map((line) => {
-    const [file, family, style] = line.split('\t');
-    return { path: file, family: family || '', style: style || 'Regular' };
-  });
-}
-
-function viaScan() {
-  const found = [];
-  const walk = (dir, depth) => {
-    if (depth > 4 || !existsSync(dir)) return;
-    for (const name of readdirSync(dir)) {
-      const p = join(dir, name);
-      try {
-        if (statSync(p).isDirectory()) walk(p, depth + 1);
-        else if (['.ttf', '.otf'].includes(extname(name).toLowerCase())) {
-          found.push({ path: p, family: name.replace(/\.[^.]+$/, ''), style: 'Regular' });
-        }
-      } catch { /* unreadable entry, skip */ }
-    }
-  };
-  for (const d of FONT_DIRS) walk(d, 0);
-  return found;
+/** Absolute path of a bundled face, or null if `file` is not one of them. */
+export function bundledFontPath(file) {
+  const p = join(FONT_DIR, file);
+  return p.startsWith(FONT_DIR + '/') ? p : null;
 }
 
 /**
  * Can opentype.js actually read this face?
  *
- * A handful of installed fonts cannot be parsed -- broken GSUB coverage
- * tables, colour-emoji faces with no outlines. Listing them means the user
- * picks one and gets "Coverage format must be 1 or 2" instead of handwriting,
- * with nothing pointing at the font. Checking costs a couple of seconds once.
+ * Not every well-formed font survives the parser -- Roboto and Lora both throw
+ * on their GSUB coverage tables ("lookupType: 6 substFormat: 2"). Offering one
+ * of those means the user picks it and gets a parser message instead of
+ * handwriting, with nothing pointing at the font. Checking nine files at
+ * startup is cheap.
  */
 export function isUsable(path) {
   try {
@@ -72,27 +48,16 @@ export function isUsable(path) {
 
 /**
  * @returns {Array<{path:string, family:string, style:string, hand:boolean}>}
- *          one usable entry per family, preferring the regular weight.
+ *          the bundled faces, in manifest order, minus any the parser rejects.
  */
 export function listFonts() {
-  let faces = [];
-  try { faces = viaFontconfig(); } catch { faces = viaScan(); }
-
-  // opentype.js parses TrueType/CFF only; .pfb and bitmap fonts would throw at
-  // layout time, which is far too late to tell the user.
-  faces = faces.filter((f) => ['.ttf', '.otf'].includes(extname(f.path).toLowerCase()));
-
-  const byFamily = new Map();
-  for (const f of faces) {
-    const regular = /^(Book|Regular|Normal|Medium)$/i.test(f.style);
-    const prev = byFamily.get(f.family);
-    if (!prev || (regular && !prev.regular)) byFamily.set(f.family, { ...f, regular });
-  }
-
-  return [...byFamily.values()]
-    .filter((f) => isUsable(f.path))
-    .map(({ regular, ...f }) => ({ ...f, hand: HAND_HINT.test(f.family) }))
-    // Script-like families first: skeletonising one of those reads as
-    // handwriting, where a text face reads as traced type.
-    .sort((a, b) => (b.hand - a.hand) || a.family.localeCompare(b.family));
+  const manifest = JSON.parse(readFileSync(join(FONT_DIR, 'fonts.json'), 'utf8'));
+  return manifest
+    .map((f) => ({
+      path: join(FONT_DIR, f.file),
+      family: f.family,
+      style: 'Regular',
+      hand: !!f.hand,
+    }))
+    .filter((f) => isUsable(f.path));
 }

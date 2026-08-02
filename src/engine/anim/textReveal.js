@@ -129,7 +129,13 @@ export function buildSegments(lines) {
  * oscillation holds its phase across a hop instead of jumping forward while the
  * pen is off the paper.
  *
- * @returns {{index:number, x:number, li:number, ink:boolean, inkDone:number}}
+ * `frac` is how far into that segment the frontier sits. It is 1 exactly when the
+ * segment is finished -- including on the last one, which the loop below clamps
+ * to rather than rolling past -- which is what tells `advance` the word is done
+ * and must stop being drawn with a ragged edge.
+ *
+ * @returns {{index:number, x:number, li:number, ink:boolean, inkDone:number,
+ *            frac:number}}
  */
 export function locateFrontier(segments, s) {
   let left = s;
@@ -144,12 +150,13 @@ export function locateFrontier(segments, s) {
         li: seg.li,
         ink: seg.ink,
         inkDone: inkDone + (seg.ink ? (seg.x1 - seg.x0) * f : 0),
+        frac: f,
       };
     }
     left -= seg.len;
     if (seg.ink) inkDone += seg.x1 - seg.x0;
   }
-  return { index: 0, x: 0, li: 0, ink: false, inkDone: 0 };
+  return { index: 0, x: 0, li: 0, ink: false, inkDone: 0, frac: 1 };
 }
 
 /** Vertical band the mask covers for a line, padded a little past the ink. */
@@ -163,9 +170,18 @@ function bandOf(line) {
  * Fill a span from `x0` to `x`, with a soft ragged right edge.
  *
  * A hard rectangle edge reads as a curtain being drawn rather than as ink being
- * laid. The displacement is a function of both y and the frontier itself, so the
- * pattern travels with the edge instead of sitting there like a fixed comb --
- * and it stays a pure function of `u`, which the determinism rules require.
+ * laid. Two constraints shape the displacement, and both exist because the mask
+ * must never retreat -- a scanline whose edge moves back is ink visibly
+ * un-drawing itself:
+ *
+ *   - it is a function of y and the baked phase only, never of x, so the comb
+ *     translates rigidly with the frontier instead of sliding along it;
+ *   - it only ever lags, never leads. A displacement centred on the frontier
+ *     puts some rows ahead of it, and those rows jump backwards the moment the
+ *     word finishes and the edge squares off.
+ *
+ * Either way it stays a pure function of `u`, which the determinism rules
+ * require.
  */
 function fillSpan(ctx, line, x0, x, phase, ragged) {
   const b = bandOf(line);
@@ -179,7 +195,7 @@ function fillSpan(ctx, line, x0, x, phase, ragged) {
     const amp = b.height * EDGE_WOBBLE;
     for (let i = 0; i <= EDGE_STEPS; i++) {
       const y = b.top + ((b.bottom - b.top) * i) / EDGE_STEPS;
-      ctx.lineTo(x + amp * Math.sin(y * 0.09 + x * 0.02 + phase), y);
+      ctx.lineTo(x - amp * 0.5 * (1 + Math.sin(y * 0.09 + phase)), y);
     }
   }
   ctx.lineTo(x0, b.bottom);
@@ -252,11 +268,14 @@ export const textReveal = register({
     for (let i = 0; i <= at.index; i++) {
       const seg = segments[i];
       if (!seg.ink) continue;
-      // Everything behind the frontier is fully revealed; only the word being
-      // written gets the ragged edge. A completed word with a wavy right edge
-      // would leave a permanent bite out of its last letter.
+      // Everything behind the frontier is fully revealed; only a word actually
+      // mid-stroke gets the ragged edge. A finished word with a wavy right edge
+      // keeps a permanent bite out of its last letter -- and `at.frac`, not the
+      // index, is what says finished: the frontier never rolls past the final
+      // segment, so at u=1 the last word of the text is still `at.index` and
+      // would otherwise stay chewed for as long as it is on screen.
       if (i < at.index) fillSpan(ctx, lines[seg.li], seg.x0, seg.x1, phase, false);
-      else fillSpan(ctx, lines[seg.li], seg.x0, at.x, phase, true);
+      else fillSpan(ctx, lines[seg.li], seg.x0, at.x, phase, at.frac < 1);
     }
     // Layer.used is only set by commitRange, and this animation never commits.
     sf.fill.markUsed();
@@ -274,8 +293,8 @@ export const textReveal = register({
     // closes it; together they trace an ellipse that drifts forward with the
     // frontier, which is the path a hand takes writing `eee`. The slant term
     // shears that ellipse so it leans into the direction of travel.
-    const vary = 1 - LOOP_VARY + LOOP_VARY * Math.sin(theta * LOOP_VARY_RATE + phase);
-    const dy = b.height * OSCILLATION_REACH * vary * Math.cos(theta);
+    const vary = (1 - LOOP_VARY + LOOP_VARY * Math.sin(theta * LOOP_VARY_RATE + phase))*0.5;
+    const dy = 0.5*b.height * OSCILLATION_REACH * vary * Math.cos(theta);
     const dx = (period / TAU) * LOOP_GAIN * Math.sin(theta) + LOOP_SLANT * dy;
 
     return {

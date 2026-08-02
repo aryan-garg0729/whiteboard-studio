@@ -20,6 +20,9 @@ contextBridge.exposeInMainWorld('studio', {
   // Bytes for the preview mixer to decode; the renderer has no file access.
   readAudio: (path) => ipcRenderer.invoke('audio:read', path),
   listFonts: () => ipcRenderer.invoke('fonts:list'),
+  // Bytes of a bundled face, so the picker can preview each name in its own
+  // type. Only faces in assets/fonts are readable; see the handler in main.
+  readFont: (path) => ipcRenderer.invoke('fonts:read', path),
   listHands: () => ipcRenderer.invoke('hands:list'),
 
   exportCapabilities: () => ipcRenderer.invoke('export:capabilities'),

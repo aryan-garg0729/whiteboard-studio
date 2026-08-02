@@ -41,7 +41,7 @@ const arg = (n, d) => { const i = argv.indexOf(n); return i === -1 ? d : argv[i 
 const flag = (n) => argv.includes(n);
 
 const TEXT = argv[0] && !argv[0].startsWith('--') ? argv[0] : 'Hello';
-const FONT = arg('--font', '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf');
+const FONT = arg('--font', join(ROOT, 'assets/fonts/Caveat.ttf'));
 const SIZE = Number(arg('--size', 150));
 const SECONDS = Number(arg('--seconds', 6));
 const OUT = resolve(ROOT, arg('--out', 'text.mp4'));

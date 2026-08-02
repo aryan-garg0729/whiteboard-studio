@@ -31,6 +31,35 @@ const DEFAULT_TEXT = {
   fontSize: 120, penWidth: 5, color: '#1a1a1a',
 };
 
+/**
+ * Load each offered face into the document so the picker can set a row in it.
+ *
+ * A name listed in the UI font tells you nothing about the face; seeing
+ * "Permanent Marker" in Permanent Marker is the whole point of a font picker.
+ * The bytes come over IPC rather than a `file://` @font-face, because Chromium
+ * refuses to fetch `file://` subresources even from a `file://` page -- the same
+ * wall the audio preview hit.
+ *
+ * The CSS family is namespaced: registering it under the real family name would
+ * let a bundled face quietly win over the app's own UI stack. A face that fails
+ * to load simply has no `cssFamily` and the row falls back to the UI font, which
+ * is a cosmetic loss and never a broken picker.
+ */
+async function registerFonts(list) {
+  return Promise.all(list.map(async (f) => {
+    try {
+      const bytes = await window.studio.readFont(f.path);
+      if (!bytes || bytes.error) return f;
+      const cssFamily = `sf-${f.family.replace(/[^a-z0-9]+/gi, '-')}`;
+      const face = await new FontFace(cssFamily, bytes.buffer ?? bytes).load();
+      document.fonts.add(face);
+      return { ...f, cssFamily };
+    } catch {
+      return f;
+    }
+  }));
+}
+
 /** Rough writing time; a long line should not race by at a fixed duration. */
 const textDuration = (s) => Math.min(12, Math.max(1.6, s.replace(/\s/g, '').length * 0.16));
 
@@ -103,15 +132,14 @@ export default function App() {
     if (!s) return;
     s.listExamples().then(setExamples);
     s.listHands().then(setHands);
-    s.listFonts().then((f) => {
+    s.listFonts().then(async (f) => {
       setFonts(f);
-      // Prefer a script face (listFonts sorts those first), then the engine's
-      // own fallback, and only then whatever happens to be installed first --
-      // an arbitrary system font is usually a poor handwriting model.
-      const pick = f.find((x) => x.hand)
-        || f.find((x) => /^DejaVu Sans$/.test(x.family))
-        || f[0];
+      // The picker shows the faces we ship, in manifest order, so the first one
+      // is already the intended default -- a script face, since that is what
+      // reads as handwriting.
+      const pick = f[0];
       setDraft((d) => (d.font ? d : { ...d, font: pick?.path || null, fontFamily: pick?.family }));
+      setFonts(await registerFonts(f));
     });
   }, []);
 

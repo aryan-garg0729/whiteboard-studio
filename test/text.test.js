@@ -292,6 +292,55 @@ test('nothing is revealed at u=0 and everything at u=1', { skip: !font }, async 
   assert.ok(covered() > half * 1.5, 'ending fully revealed');
 });
 
+test('the last letter is whole when the writing stops', { skip: !font }, async () => {
+  // The ragged frontier is a soft edge on the word being written. It used to be
+  // applied to whichever segment the frontier sat in -- and the frontier never
+  // rolls past the last one, so at u=1 the final word kept a wavy right edge
+  // permanently, eating up to EDGE_WOBBLE of the band out of the rightmost stem
+  // of the last letter. On a 'd' that is most of the stem.
+  const out = outlineText(font, 'Hello world', { fontSize: 120 });
+  const plan = await textReveal.compile({ id: 't1', layout: out });
+  const sf = surfacesFor(plan);
+  textReveal.advance(sf, plan, 1);
+
+  const ox = plan.bbox[0] - 32;
+  const oy = plan.bbox[1] - 32;
+  const col = Math.floor(out.inkBbox[2] - 1 - ox);
+  const y0 = Math.ceil(out.lines[0].y0 - oy);
+  const y1 = Math.floor(out.lines[0].y1 - oy);
+  const { data } = sf.fill.active.ctx.getImageData(col, y0, 1, y1 - y0);
+
+  let clear = 0;
+  for (let i = 3; i < data.length; i += 4) if (data[i] < 128) clear++;
+  assert.equal(clear, 0,
+    `${clear} of ${y1 - y0} rows of the last letter's rightmost column are unrevealed`);
+});
+
+test('the revealed region never shrinks, scanline by scanline', { skip: !font }, async () => {
+  // Stronger than the frontier check above: the frontier can be monotonic while
+  // the *mask* is not, if the ragged edge slides along it as it advances. A
+  // scanline whose edge retreats is ink visibly un-drawing itself.
+  const out = outlineText(font, 'Hello world', { fontSize: 120 });
+  const plan = await textReveal.compile({ id: 't1', layout: out });
+  const sf = surfacesFor(plan);
+  const oy = plan.bbox[1] - 32;
+  const rows = [0.25, 0.5, 0.75].map((f) =>
+    Math.round(out.lines[0].y0 + (out.lines[0].y1 - out.lines[0].y0) * f - oy));
+
+  const edges = rows.map(() => -Infinity);
+  for (let i = 0; i <= 120; i++) {
+    textReveal.advance(sf, plan, i / 120);
+    rows.forEach((y, r) => {
+      const { data } = sf.fill.active.ctx.getImageData(0, y, sf.w, 1);
+      let edge = -Infinity;
+      for (let x = 0; x < sf.w; x++) if (data[x * 4 + 3] > 128) edge = x;
+      assert.ok(edge >= edges[r] - 1e-9,
+        `row ${y} un-revealed ${edges[r] - edge}px at u=${(i / 120).toFixed(3)}`);
+      edges[r] = edge;
+    });
+  }
+});
+
 test('erase finds the ink on a reveal plan, which has no strokes', { skip: !font }, async () => {
   // hasInk/inkExtent scan plan.strokes, and a reveal has none -- the ink is the
   // masked artwork. Without the inkBbox fallback, Erase silently does nothing.

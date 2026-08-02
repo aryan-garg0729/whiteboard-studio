@@ -1,0 +1,11 @@
+[
+  { "file": "Caveat.ttf",                     "family": "Caveat",              "hand": true },
+  { "file": "PatrickHand-Regular.ttf",        "family": "Patrick Hand",        "hand": true },
+  { "file": "IndieFlower-Regular.ttf",        "family": "Indie Flower",        "hand": true },
+  { "file": "ArchitectsDaughter-Regular.ttf", "family": "Architects Daughter", "hand": true },
+  { "file": "PermanentMarker-Regular.ttf",    "family": "Permanent Marker",    "hand": true },
+  { "file": "Montserrat.ttf",                 "family": "Montserrat",          "hand": false },
+  { "file": "Poppins.ttf",                    "family": "Poppins",             "hand": false },
+  { "file": "OpenSans.ttf",                   "family": "Open Sans",           "hand": false },
+  { "file": "PlayfairDisplay.ttf",            "family": "Playfair Display",    "hand": false }
+]

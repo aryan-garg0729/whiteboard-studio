@@ -307,15 +307,26 @@ label.check input { accent-color: var(--accent); }
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 
-.font-list { max-height: 190px; overflow: auto; border: 1px solid var(--line-soft);
+.font-list { max-height: 320px; overflow: auto; border: 1px solid var(--line-soft);
              border-radius: var(--r); background: var(--bg-input); }
+/* Rows are set in the face they offer, so they need room to be legible and a
+   size where a script face is actually readable. */
 .font-list button {
   display: flex; align-items: center; gap: 6px; width: 100%; text-align: left;
-  background: none; border: 0; color: var(--text); padding: 4px 8px; cursor: default;
+  background: none; border: 0; color: var(--text); padding: 7px 10px; cursor: default;
+  font-size: 17px; line-height: 1.25; min-height: 34px;
 }
+.font-list button + button { border-top: 1px solid var(--line); }
+/* One line per face, so the rows stay a scannable ladder however long the
+   family name is and however wide the face sets it. */
+.font-list .font-name { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .font-list button:hover { background: var(--bg-hover); }
 .font-list button[aria-selected="true"] { background: var(--accent); color: #fff; }
-.font-list .hand-tag { margin-left: auto; font-size: 9px; color: var(--ok); }
+/* Back to the UI stack: the tag is chrome, not a sample of the face. */
+.font-list .hand-tag {
+  margin-left: auto; font: 500 9px/1 ui-sans-serif, system-ui, sans-serif; color: var(--ok);
+  letter-spacing: .04em; text-transform: uppercase;
+}
 .font-list button[aria-selected="true"] .hand-tag { color: #bfe6d7; }
 
 .hand-row {

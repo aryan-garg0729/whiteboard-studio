@@ -143,7 +143,7 @@ function ClipInspector({ ed, clip, asset, frame, fps, selection, bboxes }) {
                    onChange={(e) => ed.patchAsset(asset.id, { color: e.target.value })} />
           </Field>
           <div className="hint" title={asset.font || 'default'}>
-            Face: {(asset.font || 'DejaVu Sans').split('/').pop()}
+            Face: {(asset.font || 'Caveat').split('/').pop()}
             {' — change it in the Library’s Text tab.'}
           </div>
         </Group>
