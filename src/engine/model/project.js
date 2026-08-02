@@ -16,7 +16,7 @@ export const DEFAULTS = {
   // `name` is the authored project title, independent of the filename so it
   // survives a Save As and a copied file.
   meta: { version: SCHEMA_VERSION, name: '', fps: 30, width: 1920, height: 1080,
-          background: '#fdfdfb', handStyleId: 'hand1', showHand: true },
+          background: '#fdfdfb', handStyleId: 'hand3', showHand: true },
   transform: { x: 0, y: 0, scale: 1, rotation: 0 },
   camera: { t: 0, x: 0, y: 0, zoom: 1 },
 };
@@ -41,11 +41,10 @@ const APPEAR = ['appear.instant', 'appear.fade', 'appear.pop', 'appear.slide'];
  * just invites a clip that renders nothing.
  */
 export const ANIMATIONS_FOR_KIND = {
-  // Reveal first: it is the default for anything new, and `draw.outlineFill`
-  // is kept only so projects authored against it keep looking the way they did.
+  // The guided text trace is first because it is the default for new captions.
   image: ['draw.imageReveal', 'draw.outlineFill', ...APPEAR],
   vector: ['draw.imageReveal', 'draw.outlineFill', ...APPEAR],
-  text: ['draw.textReveal', 'draw.handwrite', ...APPEAR],
+  text: ['draw.handwrite', 'draw.textReveal', ...APPEAR],
 };
 
 /** What a timeline track can hold. */

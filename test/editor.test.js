@@ -24,13 +24,17 @@ test('uniqueId skips ids already in use', () => {
   assert.equal(uniqueId('clip', new Set(['clip1', 'clip2'])), 'clip3');
 });
 
+test('a new editor document defaults to hand3', () => {
+  assert.equal(EMPTY_PROJECT.meta.handStyleId, 'hand3');
+});
+
 test('an added clip lands after everything already on the timeline', () => {
   let doc = addClipTo(base(), { kind: 'image', src: '/a.png' }, { duration: 4 });
   assert.equal(doc.clips[0].start, 0);
 
   doc = addClipTo(doc, { kind: 'text', text: 'hi' }, { duration: 2 });
   assert.equal(doc.clips[1].start, 4, 'second clip starts where the first ends');
-  assert.equal(doc.clips[1].animId, 'draw.textReveal', 'text defaults to the reveal');
+  assert.equal(doc.clips[1].animId, 'draw.handwrite', 'text defaults to guided tracing');
   assert.equal(doc.clips[0].animId, 'draw.imageReveal', 'artwork defaults to the reveal');
 });
 

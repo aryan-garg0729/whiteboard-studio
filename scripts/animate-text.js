@@ -9,8 +9,8 @@
  *                                [--reveal]
  *
  * `--reveal` uses draw.textReveal: the real filled letterforms appear left to
- * right under an oscillating hand. Without it, draw.handwrite traces the
- * skeletonised centrelines, which needs the Python sidecar.
+ * right under an oscillating hand. Without it, draw.handwrite follows
+ * character-level guides while revealing the same real font outlines.
  */
 
 import { createCanvas, loadImage } from '@napi-rs/canvas';
@@ -21,8 +21,7 @@ import opentype from 'opentype.js';
 
 import { setSurfaceFactory } from '../src/engine/render/surfaces.js';
 import { createSession, ensureSurfaces, renderFrame } from '../src/engine/render/renderFrame.js';
-import { Sidecar } from '../src/engine/sidecar/client.js';
-import { layoutText, outlineText } from '../src/engine/compile/text.js';
+import { outlineText, traceText } from '../src/engine/compile/text.js';
 import { exportVideo } from '../src/engine/export/driver.js';
 import { compileErase } from '../src/engine/anim/erase.js';
 import { paintVectorArt } from '../src/engine/render/vectorArt.js';
@@ -73,25 +72,11 @@ async function main() {
               + `${((Date.now() - t0) / 1000).toFixed(2)}s (no sidecar)`);
     if (!layout.regions.length) throw new Error('no glyph outlines produced');
   } else {
-    const sidecar = new Sidecar({ root: ROOT, cacheDir: join(ROOT, '.cache') });
-    layout = await layoutText(font, TEXT, {
-      fontSize: SIZE,
-      penWidth: Math.max(2, SIZE * 0.05),
-      getSkeleton: (commands, key) => sidecar.skeletonizeGlyph(commands, {
-        key, unitsPerEm: font.unitsPerEm, size: 256, supersample: 2,
-      }),
-    });
-    sidecar.stop();
-
-    const drawn = layout.strokes.filter((s) => !s.lift).length;
-    console.log(`  ${layout.strokes.length} strokes (${drawn} drawn, `
-              + `${layout.strokes.length - drawn} pen-lifts) in `
+    layout = traceText(font, TEXT, { fontSize: SIZE, penWidth: Math.max(2, SIZE * 0.05) });
+    const drawn = layout.guides.filter((s) => !s.lift).length;
+    console.log(`  ${layout.guides.length} guide strokes (${drawn} drawn) in `
               + `${((Date.now() - t0) / 1000).toFixed(1)}s`);
-    if (!layout.monoline) {
-      console.log('  note: this face is modulated (serif/high-contrast); '
-                + 'centrelines will read as traced type rather than handwriting');
-    }
-    if (!drawn) throw new Error('no strokes produced');
+    if (!drawn) throw new Error('no guide strokes produced');
   }
 
   const project = {
@@ -121,10 +106,8 @@ async function main() {
 
   // The reveal masks artwork rather than laying ink, so the letterforms have to
   // be painted into `art` first -- exactly as a vector clip's fills are.
-  if (REVEAL) {
-    ensureSurfaces(session, project);
-    paintVectorArt(session.surfaces.get('t1').ensureArt().ctx, layout.regions, []);
-  }
+  ensureSurfaces(session, project);
+  paintVectorArt(session.surfaces.get('t1').ensureArt().ctx, layout.regions, []);
 
   const canvas = createCanvas(WIDTH, HEIGHT);
   const ctx = canvas.getContext('2d');

@@ -4,8 +4,8 @@
  * These are bundled with the app rather than discovered on the machine. Font
  * enumeration sounds friendlier -- use whatever the user already has -- but a
  * stock Linux box lists a couple of hundred families of which none is a
- * handwriting face, and handwriting is the whole point here: skeletonising a
- * modulated serif gives lumpy centrelines, while a script face reads as writing.
+ * handwriting face, and handwriting is the whole point here: script faces
+ * make the character-level writing guides read most naturally.
  * A fixed set also means a project opened elsewhere writes in the face it was
  * authored in, which a path into /usr/share/fonts cannot promise.
  *

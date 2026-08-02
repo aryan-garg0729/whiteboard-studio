@@ -13,6 +13,7 @@
 
 import { makeStroke } from './geometry.js';
 import { flattenPath } from './svgPath.js';
+import { guideForCharacter } from './textGuides.js';
 
 /** Stable cache key for a glyph outline at given options. */
 export function glyphKey(commands, upem, opts = {}) {
@@ -158,14 +159,15 @@ export function placeGlyphs(font, text, o) {
     // implement (DejaVu Sans hits "lookupType: 6 substFormat: 2"). Handwriting
     // is drawn character by character anyway, so shaping buys us nothing here
     // -- and kerning still applies, since getKerningValue works on glyph pairs.
-    const glyphs = [...line].map((ch) => font.charToGlyph(ch));
+    const chars = [...line];
+    const glyphs = chars.map((ch) => font.charToGlyph(ch));
     let penX = 0;
     glyphs.forEach((glyph, i) => {
       if (i > 0) {
         // getKerningValue reads both `kern` and GPOS pair positioning
         penX += font.getKerningValue(glyphs[i - 1], glyph) || 0;
       }
-      placements.push({ glyph, penX, lineIndex });
+      placements.push({ glyph, ch: chars[i], penX, lineIndex });
       penX += glyph.advanceWidth;
     });
     maxWidth = Math.max(maxWidth, penX);
@@ -264,6 +266,7 @@ export function outlineText(font, text, o) {
   const eps = Math.max(0.05, o.fontSize * 0.0025);
 
   const regions = [];
+  const glyphs = [];
   /** Per line: the ink band, and the runs of consecutive inked glyphs in it. */
   const lines = Array.from({ length: lineCount }, () => ({
     y0: Infinity, y1: -Infinity, spans: [], broke: true,
@@ -276,7 +279,11 @@ export function outlineText(font, text, o) {
     // guessing from the gap width instead needs a threshold that separates a
     // space from a letter's sidebearings, which no single number does across
     // fonts and sizes.
-    if (!p.glyph.path.commands.length) { line.broke = true; continue; }
+    if (!p.glyph.path.commands.length) {
+      glyphs.push({ ch: p.ch, lineIndex: p.lineIndex, ink: false });
+      line.broke = true;
+      continue;
+    }
 
     // opentype positions and scales the outline for us, and emits y-down --
     // exactly the mapping layoutText applies by hand to its centrelines, so the
@@ -285,17 +292,22 @@ export function outlineText(font, text, o) {
     const rings = flattenPath(path.toPathData(3), { eps })
       .map((s) => s.pts)
       .filter((pts) => pts.length >= 6);
-    if (!rings.length) continue;
+    if (!rings.length) {
+      glyphs.push({ ch: p.ch, lineIndex: p.lineIndex, ink: false });
+      continue;
+    }
 
-    let x0 = Infinity; let x1 = -Infinity;
+    let x0 = Infinity; let y0 = Infinity; let x1 = -Infinity; let y1 = -Infinity;
     for (const pts of rings) {
       for (let i = 0; i < pts.length; i += 2) {
         if (pts[i] < x0) x0 = pts[i];
         if (pts[i] > x1) x1 = pts[i];
-        if (pts[i + 1] < line.y0) line.y0 = pts[i + 1];
-        if (pts[i + 1] > line.y1) line.y1 = pts[i + 1];
+        if (pts[i + 1] < y0) y0 = pts[i + 1];
+        if (pts[i + 1] > y1) y1 = pts[i + 1];
       }
     }
+    line.y0 = Math.min(line.y0, y0);
+    line.y1 = Math.max(line.y1, y1);
 
     // A span is a *word*, not a letter: the reveal must not stop and restart
     // between the letters of a word, only across the gaps where the pen lifts.
@@ -304,7 +316,10 @@ export function outlineText(font, text, o) {
     else line.spans.push([x0, x1]);
     line.broke = false;
 
+    const regionIndex = regions.length;
     regions.push({ rings, color });
+    glyphs.push({ ch: p.ch, lineIndex: p.lineIndex, ink: true, regionIndex,
+      rings, bbox: [x0, y0, x1, y1] });
   }
 
   const w = maxWidth * scale;
@@ -328,6 +343,7 @@ export function outlineText(font, text, o) {
 
   return {
     regions,
+    glyphs,
     // `broke` is loop bookkeeping, not part of the shape the hosts serialise.
     lines: lines.map(({ y0, y1, spans }) => ({ y0, y1, spans })),
     bbox: textBbox(o.fontSize, w, h),
@@ -335,6 +351,53 @@ export function outlineText(font, text, o) {
     width: w,
     height: h,
   };
+}
+
+/**
+ * Convert the selected font's glyphs into calm writing gestures.
+ *
+ * Each route is defined in a unit square and fitted to the glyph's true ink
+ * bounds.  This deliberately does not skeletonise the glyph: an Open Sans
+ * "a" and a Caveat "a" need different finished pixels, but a viewer still
+ * recognises the same hand gesture making both.
+ */
+export function traceText(font, text, o) {
+  const layout = outlineText(font, text, o);
+  const guides = [];
+  for (const glyph of layout.glyphs) {
+    if (!glyph.ink) continue;
+    const route = guideForCharacter(glyph.ch);
+    const [x0, y0, x1, y1] = glyph.bbox;
+    const w = Math.max(1, x1 - x0);
+    const h = Math.max(1, y1 - y0);
+    const strokes = route || [[ [0.08, 0.5], [0.92, 0.5] ]];
+    for (let i = 0; i < strokes.length; i++) {
+      const pts = [];
+      for (const [gx, gy] of strokes[i]) pts.push(x0 + gx * w, y0 + gy * h);
+      if (pts.length >= 4) guides.push({ pts, glyph: glyph.regionIndex, lift: false,
+        width: Math.max(o.penWidth ?? 3, Math.min(w, h) * 0.38) });
+      if (i < strokes.length - 1) {
+        const a = strokes[i][strokes[i].length - 1];
+        const b = strokes[i + 1][0];
+        guides.push({ pts: travelArc([x0 + a[0] * w, y0 + a[1] * h], [x0 + b[0] * w, y0 + b[1] * h]).pts,
+          glyph: glyph.regionIndex, lift: true, width: 0 });
+      }
+    }
+  }
+  // Join adjacent glyph routes with pen-up motion.  Guide entries already
+  // retain their glyph ownership, which lets the animation close a completed
+  // outline exactly when its last route finishes.
+  const joined = [];
+  for (const guide of guides) {
+    const prev = joined[joined.length - 1];
+    if (prev && !prev.lift && !guide.lift && prev.glyph !== guide.glyph) {
+      const a = [prev.pts[prev.pts.length - 2], prev.pts[prev.pts.length - 1]];
+      const b = [guide.pts[0], guide.pts[1]];
+      joined.push({ pts: travelArc(a, b).pts, glyph: prev.glyph, lift: true, width: 0 });
+    }
+    joined.push(guide);
+  }
+  return { ...layout, guides: joined };
 }
 
 function meanModulation(list) {

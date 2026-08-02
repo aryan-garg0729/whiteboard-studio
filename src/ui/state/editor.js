@@ -33,7 +33,7 @@ const HISTORY_LIMIT = 100;
 export const EMPTY_PROJECT = {
   meta: {
     version: 1, name: '', fps: 30, width: 1920, height: 1080,
-    background: '#fdfdfb', handStyleId: 'hand1', showHand: true,
+    background: '#fdfdfb', handStyleId: 'hand3', showHand: true,
   },
   assets: {},
   pages: [{ id: 'page1', name: 'Page 1', cameraKeyframes: [{ t: 0, x: 0, y: 0, zoom: 1 }] }],
@@ -143,7 +143,7 @@ export function addClipTo(doc, asset, { animId, duration = 3, transform, clipId:
     clips: [...doc.clips, {
       id: clipId,
       assetId,
-      animId: animId || (asset.kind === 'text' ? 'draw.textReveal' : 'draw.imageReveal'),
+      animId: animId || (asset.kind === 'text' ? 'draw.handwrite' : 'draw.imageReveal'),
       // Whichever page is showing then -- not page 1. A clip born on a hidden
       // page is rejected outright by the validator.
       pageId: pageAt(doc, start),

@@ -61,10 +61,15 @@ export async function buildSession(loaded) {
     const p = prepared[clip.id];
     let plan;
 
-    if (p.kind === 'text' && p.mode === 'reveal') {
+    if (p.kind === 'text' && (p.mode === 'reveal' || p.mode === 'trace')) {
       // Both the reveal and the entrances draw filled letterforms; only the
       // reveal needs the line/span layout to walk a frontier along.
-      plan = isAppear(clip.animId)
+      plan = p.mode === 'trace'
+        ? await handwrite.compile({ layout: {
+          bbox: p.bbox, inkBbox: p.inkBbox, regions: p.regions,
+          guides: p.guides.map((g) => ({ ...g, pts: f64(g.pts) })),
+        } })
+        : isAppear(clip.animId)
         ? await getAnimation(clip.animId).compile({
           id: clip.id, bbox: p.bbox, inkBbox: p.inkBbox, penWidth: p.penWidth,
         })
@@ -77,8 +82,7 @@ export async function buildSession(loaded) {
             penWidth: p.penWidth,
           },
         });
-      // The reveal is a mask, so unlike handwriting it needs artwork underneath
-      // to reveal -- the filled letterforms.
+      // Both text drawing modes are masks over the actual glyph outlines.
       artJobs.push({ clipId: clip.id, prepared: p });
     } else if (p.kind === 'text') {
       const strokes = p.strokes.map((s) => makeStroke(f64(s.pts), {

@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 import opentype from 'opentype.js';
 
 import { parseSvg } from '../src/engine/compile/svgDoc.js';
-import { layoutText, outlineText } from '../src/engine/compile/text.js';
+import { outlineText, traceText } from '../src/engine/compile/text.js';
 import { styleIdsFor } from '../src/engine/hand/styles.js';
 
 const arr = (a) => (Array.isArray(a) ? a : Array.from(a));
@@ -118,13 +118,8 @@ export async function prepareProject(project, projectPath, sidecar) {
         color: asset.color,
       };
 
-      // The text animations want completely different geometry, so the branch
-      // is on the clip's animation rather than on the asset kind: filled
-      // letterforms unless the clip is actually handwriting them. The
-      // reveal needs the outline, and so does every entrance -- an appearing
-      // caption has artwork to show and no centreline to trace, and asking the
-      // sidecar to skeletonise glyphs it will never draw costs a round trip per
-      // distinct glyph for nothing.
+      // Both text drawing modes reveal real outlines. Trace additionally gets
+      // a font-independent writing guide; neither path skeletonises glyphs.
       if (clip.animId !== 'draw.handwrite') {
         const layout = outlineText(font, asset.text, opts);
         prepared[clip.id] = {
@@ -139,23 +134,17 @@ export async function prepareProject(project, projectPath, sidecar) {
           regions: layout.regions.map((r) => ({ rings: r.rings.map(arr), color: r.color })),
         };
       } else {
-        const layout = await layoutText(font, asset.text, {
-          ...opts,
-          getSkeleton: (commands, key) => sidecar.skeletonizeGlyph(commands, {
-            key, unitsPerEm: font.unitsPerEm, size: 256, supersample: 2,
-          }),
-        });
+        const layout = traceText(font, asset.text, opts);
         prepared[clip.id] = {
           kind: 'text',
+          mode: 'trace',
           bbox: arr(layout.bbox),
+          inkBbox: arr(layout.inkBbox),
           width: layout.width,
           height: layout.height,
-          monoline: layout.monoline,
-          // Strokes are re-derived in the renderer; only the raw polylines and
-          // their brush settings need to cross the boundary.
-          strokes: layout.strokes.map((s) => ({
-            pts: arr(s.pts), width: s.width, color: s.color, lift: s.lift,
-          })),
+          regions: layout.regions.map((r) => ({ rings: r.rings.map(arr), color: r.color })),
+          guides: layout.guides.map((g) => ({ pts: arr(g.pts), glyph: g.glyph,
+            lift: g.lift, width: g.width })),
         };
       }
     }

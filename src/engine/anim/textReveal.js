@@ -3,12 +3,9 @@
  * over the reveal frontier.
  *
  * This is what reference whiteboard products actually do, and it is a different
- * idea from `draw.handwrite`. That one traces a centreline through each letter,
- * which means the letters are only ever as good as the skeleton -- on any face
- * that is not near-monoline, a constant-width stroke down the middle of a
- * modulated letterform simply does not look like that letter. Here the artwork
- * is the real filled glyph outline and the animation only decides *how much of
- * it is visible*, so the type is exactly the type.
+ * idea from `draw.handwrite`. That one walks a character-level handwriting
+ * guide; this mode instead sweeps whole words. Both retain the real filled
+ * glyph outline, so the final type is exactly the selected font.
  *
  * The hand is not tracing anything. It jiggles up and down over the frontier,
  * which at playback speed reads as writing far better than a pen crawling

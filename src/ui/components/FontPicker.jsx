@@ -24,8 +24,7 @@ export function FontList({ fonts, value, onPick }) {
           onClick={() => onPick(f)}
         >
           <span className="font-name">{f.family}</span>
-          {/* Skeletonising a modulated face gives lumpy centrelines; the
-              script-like families are the ones that read as handwriting. */}
+          {/* Script-like families make the writing guides read most naturally. */}
           {f.hand && <span className="hand-tag">script</span>}
         </button>
       ))}

@@ -112,9 +112,8 @@ function ClipInspector({ ed, clip, asset, fonts, frame, fps, selection, bboxes }
         )}
         {asset.kind === 'text' && clip.animId === 'draw.handwrite' && (
           <div className="hint">
-            Traces a centreline through each letter. Faithful on near-monoline
-            faces; on a modulated one it reads as traced type rather than
-            handwriting — “Write” draws the real letterforms instead.
+            Follows a calm handwriting guide for each character while revealing
+            the selected font’s real letterforms.
           </div>
         )}
         <AnimParams ed={ed} clip={clip} />

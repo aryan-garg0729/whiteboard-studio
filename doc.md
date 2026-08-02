@@ -69,7 +69,7 @@ src/
       appear.js      #   entrances: instant/fade/pop/slide, no pen at all
       imageReveal.js #   images: the pen reveals the real artwork (the default)
       outlineFill.js #   images: outline pass, then zig-zag colour pass (legacy)
-      handwrite.js   #   text: centreline strokes
+      handwrite.js   #   text: guided, font-faithful letter tracing
       erase.js       #   erase modifier (not an animation type — see below)
     render/
       renderFrame.js #   THE contract: pure (project, frameIndex) -> pixels;
@@ -201,7 +201,7 @@ mode (`showHand: false`) draws no sprite at all.
 | Image drawing | `draw.imageReveal` — the pen paints a mask and `composite()` shows the real artwork through it, so what is drawn *is* the asset. Each region closes with its own polygon as its scribble finishes, so no coverage hole can survive; `settles: false`, because there is nothing to change into |
 | Entrances | `appear.instant` / `fade` / `pop` / `slide` for every asset kind — the mask is filled whole and the entrance is an opacity/offset/scale applied at **blit** time (`AnimationType.present`), because the surfaces only extend 32px past the drawable and a pop would clip itself |
 | Clip params | The Inspector renders the selected animation's `paramSchema` generically, so an animation declares what it needs (slide direction, pen width, scribble angle) instead of growing bespoke controls |
-| Text handwriting | `draw.handwrite` — opentype.js layout + skeletonized centrelines, role-based stroke order. Still selectable, and still what every pre-existing project uses |
+| Text handwriting | `draw.handwrite` — semantic character guides reveal the selected OpenType glyph outlines. Still selectable, and still what every pre-existing project uses |
 | SVG import | Shapes, groups, nested transforms, style/presentation attrs, fill→region, holes |
 | App shell | Electron + React; library, stage, inspector, timeline. Commands live in the **real application menu** (`buildMenu` in `electron/main.js`) and reach the renderer over `menu:command`; the in-app row keeps only the brand, the click-to-rename project title, undo/redo and Export |
 | Project name | `meta.name`, independent of the filename so it survives Save As; falls back to the filename, then "Untitled", and mirrors into the window title |
@@ -256,12 +256,9 @@ mode (`showHand: false`) draws no sprite at all.
   but the result is still weaker than for line art. An import-time tuning panel (colour
   count, min region area, smoothing) is the intended mitigation — `vectorize.py` already
   accepts all of these.
-- **Skeletonisation quality varies by font — which is why it is no longer the default.**
-  It extracts the medial axis of a *printed* letterform. Near-monoline faces are excellent;
-  modulated serifs read as traced type. The sidecar returns a `modulation` figure and
-  `monoline` flag — measured DejaVu Sans 0.07–0.21 vs DejaVu Serif 0.23–0.27 — and the
-  scripts warn. This limitation is now scoped to `draw.handwrite`; `draw.textReveal` sidesteps
-  it entirely by drawing the outline rather than a stroke down the middle of it.
+- **Skeletonisation quality varies by font.** It extracts the medial axis of a
+  *printed* letterform, so modulated serifs read as traced type. Text drawing no
+  longer uses that route: both text animations preserve the selected glyph outlines.
 - **The writing hand loops; it does not zigzag.** A pure vertical sine only ever moves the
   nib forward, so every stroke is a straight diagonal and the motion reads as a machine.
   `textReveal` adds a horizontal sine in quadrature, making the path an ellipse dragged

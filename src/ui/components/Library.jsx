@@ -120,8 +120,8 @@ function TextTab({ fonts, draft, setDraft, onAdd }) {
         <Icon d={PATH.plus} /> Add text clip
       </button>
       <div className="hint">
-        Letters are written as true centre-line strokes, so the pen follows the
-        shape of each character rather than wiping a rendered word.
+        Letters follow a handwriting guide while their real font shapes reveal
+        smoothly, character by character.
       </div>
     </div>
   );

@@ -85,7 +85,7 @@ export default function App() {
    * end up centred on.
    *
    * Centring cannot be done at add time: a drawable's bounding box only exists
-   * once the sidecar has traced the image or skeletonised the glyphs. So the
+   * once the sidecar has traced an image or text layout has measured glyphs. So the
    * clip lands at the centre point immediately -- on screen, which is the
    * actual complaint -- and is centred exactly when the geometry arrives.
    */
@@ -204,7 +204,7 @@ export default function App() {
       ed.markPrepared(rev);
       return;
     }
-    setStatus({ title: 'Preparing artwork', detail: 'Tracing images and skeletonising glyphs…' });
+    setStatus({ title: 'Preparing artwork', detail: 'Tracing images and laying out glyphs…' });
     try {
       const loaded = await window.studio.prepareProject(doc, path);
       if (loaded?.error) { setError(loaded.error); return; }

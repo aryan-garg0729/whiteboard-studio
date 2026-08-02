@@ -7,7 +7,7 @@
  *                             [--frames-only] [--no-hand]
  *
  * Exercises every finished subsystem at once: the Python vectorizer, the
- * outline-then-scribble animation, glyph skeletonisation, the hand rig, the
+ * outline-then-scribble animation, font-faithful text tracing, the hand rig, the
  * erase modifier, multi-clip timeline scheduling, and MP4 export.
  */
 
@@ -20,7 +20,8 @@ import opentype from 'opentype.js';
 import { setSurfaceFactory } from '../src/engine/render/surfaces.js';
 import { createSession, renderFrame } from '../src/engine/render/renderFrame.js';
 import { Sidecar, toAsset } from '../src/engine/sidecar/client.js';
-import { layoutText } from '../src/engine/compile/text.js';
+import { traceText } from '../src/engine/compile/text.js';
+import { paintVectorArt } from '../src/engine/render/vectorArt.js';
 import { compileErase } from '../src/engine/anim/erase.js';
 import { exportVideo } from '../src/engine/export/driver.js';
 import outlineFill from '../src/engine/anim/outlineFill.js';
@@ -74,14 +75,8 @@ async function main() {
   const font = opentype.parse(fontBuf.buffer.slice(
     fontBuf.byteOffset, fontBuf.byteOffset + fontBuf.byteLength));
   const FONT_SIZE = 120;
-  const layout = await layoutText(font, TEXT, {
-    fontSize: FONT_SIZE,
-    penWidth: 5,
-    getSkeleton: (commands, key) => sidecar.skeletonizeGlyph(commands, {
-      key, unitsPerEm: font.unitsPerEm, size: 256, supersample: 2,
-    }),
-  });
-  console.log(`caption "${TEXT}": ${layout.strokes.filter((s) => !s.lift).length} strokes`);
+  const layout = traceText(font, TEXT, { fontSize: FONT_SIZE, penWidth: 5 });
+  console.log(`caption "${TEXT}": ${layout.guides.filter((s) => !s.lift).length} guide strokes`);
   sidecar.stop();
 
   // --- layout on the page ---
@@ -151,6 +146,7 @@ async function main() {
     { width: WIDTH, height: HEIGHT, showHand: false });
   session.surfaces.get('img').ensureArt().ctx
     .drawImage(await loadImage(IMAGE), 0, 0, aw, ah);
+  paintVectorArt(session.surfaces.get('txt').ensureArt().ctx, layout.regions, []);
   session.surfaces.forEach((s) => s.resetAll());
   const draw = (n) => renderFrame(session, project, n, ctx, {
     width: WIDTH, height: HEIGHT, showHand: SHOW_HAND, handStyleId: handStyle.id,

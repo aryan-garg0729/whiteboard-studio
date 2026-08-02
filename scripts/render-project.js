@@ -19,7 +19,7 @@ import { setSurfaceFactory } from '../src/engine/render/surfaces.js';
 import { createSession, ensureSurfaces, renderFrame } from '../src/engine/render/renderFrame.js';
 import { normalizeProject, projectFrames } from '../src/engine/model/project.js';
 import { Sidecar, toAsset } from '../src/engine/sidecar/client.js';
-import { layoutText, outlineText } from '../src/engine/compile/text.js';
+import { outlineText, traceText } from '../src/engine/compile/text.js';
 import { parseSvg } from '../src/engine/compile/svgDoc.js';
 import { paintVectorArt } from '../src/engine/render/vectorArt.js';
 import { compileErase } from '../src/engine/anim/erase.js';
@@ -101,9 +101,8 @@ async function buildTextClip(session, sidecar, project, clip, asset) {
     color: asset.color,
   };
 
-  // Same branch as electron/prepare.js, and it has to stay that way: preview and
-  // export must build byte-identical plans from the same document. Filled
-  // letterforms for everything except handwriting.
+  // Same branch as electron/prepare.js: both drawing modes retain real glyph
+  // outlines, while trace adds semantic writing guides.
   if (clip.animId !== 'draw.handwrite') {
     const layout = outlineText(font, asset.text, opts);
     const plan = isAppear(clip.animId)
@@ -114,17 +113,8 @@ async function buildTextClip(session, sidecar, project, clip, asset) {
     return { plan, layout, vector: layout };
   }
 
-  const layout = await layoutText(font, asset.text, {
-    ...opts,
-    getSkeleton: (commands, key) => sidecar.skeletonizeGlyph(commands, {
-      key, unitsPerEm: font.unitsPerEm, size: 256, supersample: 2,
-    }),
-  });
-  if (!layout.monoline) {
-    console.log(`  note: ${asset.id} uses a modulated face; centrelines will read as `
-              + 'traced type rather than handwriting');
-  }
-  return { plan: await handwrite.compile({ layout }), layout };
+  const layout = traceText(font, asset.text, opts);
+  return { plan: await handwrite.compile({ layout }), layout, vector: layout };
 }
 
 async function main() {

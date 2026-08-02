@@ -6,8 +6,10 @@ import { createCanvas } from '@napi-rs/canvas';
 
 import {
   glyphKey, classifyStrokes, orientStroke, orderGlyphStrokes,
-  layoutText, outlineText,
+  layoutText, outlineText, traceText,
 } from '../src/engine/compile/text.js';
+import { guideForCharacter } from '../src/engine/compile/textGuides.js';
+import handwrite from '../src/engine/anim/handwrite.js';
 import { setSurfaceFactory, ClipSurfaces } from '../src/engine/render/surfaces.js';
 import { compileErase, hasInk } from '../src/engine/anim/erase.js';
 import textReveal, {
@@ -133,6 +135,48 @@ test('outlined text keeps the real letterforms, counters and all', { skip: !font
   // would paint a solid blob instead of a letter.
   assert.equal(out.regions[0].rings.length, 2, "'o' must keep its counter");
   assert.equal(out.regions[2].rings.length, 1, "'l' is a single contour");
+});
+
+test('every printable ASCII glyph has a deliberate writing guide', () => {
+  for (let code = 33; code <= 126; code++) {
+    const ch = String.fromCharCode(code);
+    const guide = guideForCharacter(ch);
+    assert.ok(guide?.length, `${JSON.stringify(ch)} has no guide`);
+    for (const stroke of guide) assert.ok(stroke.length >= 2, `${JSON.stringify(ch)} has a degenerate stroke`);
+  }
+});
+
+test('trace guides reveal real glyph outlines and never rotate the hand', { skip: !font }, async () => {
+  const layout = traceText(font, 'A0?!', { fontSize: 120, penWidth: 5 });
+  assert.equal(layout.regions.length, 4);
+  assert.ok(layout.guides.some((g) => g.lift), 'multi-stroke letters lift the pen');
+  const plan = await handwrite.compile({ layout });
+  const sf = surfacesFor(plan);
+  for (let i = 0; i <= 80; i++) {
+    const pen = handwrite.advance(sf, plan, i / 80);
+    assert.equal(pen.tangent, 0, 'guide turns must move at the wrist, not rotate the arm');
+  }
+  const { data } = sf.fill.active.ctx.getImageData(0, 0, sf.w, sf.h);
+  assert.ok(data.some((v, i) => i % 4 === 3 && v > 0), 'the completed true-outline mask has ink');
+});
+
+test('trace reveals an active glyph as one advancing soft wipe, not stroke fragments', { skip: !font }, async () => {
+  const layout = traceText(font, 'O', { fontSize: 160, penWidth: 5 });
+  const plan = await handwrite.compile({ layout });
+  const sf = surfacesFor(plan);
+  const [x0, y0, x1, y1] = plan.glyphBounds[0];
+  const y = Math.round((y0 + y1) / 2 - sf.originY);
+  let previous = -Infinity;
+  for (const u of [0.15, 0.3, 0.45, 0.6, 0.75]) {
+    handwrite.advance(sf, plan, u);
+    const { data } = sf.fill.active.ctx.getImageData(0, y, sf.w, 1);
+    let edge = -Infinity;
+    for (let x = Math.floor(x0 - sf.originX); x <= Math.ceil(x1 - sf.originX); x++) {
+      if (data[x * 4 + 3] > 16) edge = x;
+    }
+    assert.ok(edge >= previous, `glyph reveal retreated at u=${u}`);
+    previous = edge;
+  }
 });
 
 test('outline and centreline layouts agree on where a glyph sits', { skip: !font }, async () => {
