@@ -62,6 +62,11 @@ test('video args describe a top-down RGBA pipe at the requested size', () => {
   assert.equal(args[args.indexOf('-i') + 1], 'pipe:0');
 });
 
+test('export threads can be capped explicitly', () => {
+  const args = buildFfmpegArgs({ width: 16, height: 16, fps: 30, out: 'o.mp4', threads: 7 });
+  assert.equal(args[args.indexOf('-threads') + 1], '7');
+});
+
 test('output is always yuv420p for player compatibility', () => {
   const args = buildFfmpegArgs({ width: 1920, height: 1080, fps: 30, out: 'o.mp4' });
   assert.equal(args[args.indexOf('-pix_fmt') + 1], 'yuv420p');

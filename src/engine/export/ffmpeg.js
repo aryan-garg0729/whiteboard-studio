@@ -74,6 +74,7 @@ export function buildAudioGraph(clips) {
  * @param {AudioClip[]} [o.audio]
  * @param {number} [o.duration] total seconds; caps output when there is no audio
  * @param {'quality'|'fast'} [o.preset]
+ * @param {number} [o.threads] encoder threads; defaults to available cores - 1
  */
 export function buildFfmpegArgs(o) {
   const args = ['-y',
@@ -99,6 +100,11 @@ export function buildFfmpegArgs(o) {
   } else {
     args.push('-c:v', 'libx264', '-preset', 'medium', '-crf', '18');
   }
+
+  // Leave one core available for the frame renderer and the host process.
+  // Explicitly setting this also makes export CPU usage predictable across
+  // machines whose ffmpeg builds choose different automatic thread counts.
+  if (o.threads != null) args.push('-threads', String(Math.max(1, Math.floor(o.threads))));
 
   // yuv420p is mandatory for QuickTime and browser playback.
   args.push('-pix_fmt', 'yuv420p');

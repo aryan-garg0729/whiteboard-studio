@@ -98,7 +98,7 @@ async function main() {
       renderFrame(session, project, n, ctx, {
         width: WIDTH, height: HEIGHT, showHand: true, handStyleId: handStyle.id,
       });
-      return ctx.getImageData(0, 0, WIDTH, HEIGHT).data;
+      return canvas.data();
     },
     onProgress: ({ frame, total }) => {
       process.stdout.write(`\rencoding ${frame}/${total}`);

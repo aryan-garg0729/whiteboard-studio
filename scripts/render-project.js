@@ -209,7 +209,9 @@ async function main() {
   await exportVideo({
     frames, width, height, fps, out,
     audio: project.audio.map((a) => ({ ...a, file: rel(a.src) })),
-    renderFrameRGBA(n) { draw(n); return ctx.getImageData(0, 0, width, height).data; },
+    // @napi-rs/canvas returns a raw RGBA snapshot without constructing an
+    // ImageData wrapper for every frame.
+    renderFrameRGBA(n) { draw(n); return canvas.data(); },
     onProgress: ({ frame, total }) => process.stdout.write(`\rencoding ${frame}/${total}`),
   });
   const secs = (Date.now() - t0) / 1000;

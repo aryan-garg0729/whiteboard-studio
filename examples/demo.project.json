@@ -1,42 +1,158 @@
 {
   "meta": {
     "version": 1,
-    "fps": 30,
+    "name": "",
+    "fps": 60,
     "width": 1920,
     "height": 1080,
-    "background": "#fdfdfb",
-    "handStyleId": "hand1"
+    "background": "#fefed7",
+    "handStyleId": "hand3",
+    "showHand": true
   },
   "assets": {
-    "cup": { "kind": "image", "src": "../assets/demo/lineart.png" },
-    "caption": {
+    "text1": {
       "kind": "text",
-      "text": "Fresh coffee",
+      "text": "abcdefghijklmnopqrstuvwxyz\n\nABCDEFGHIJKLMNOPQRSTUVWXYZ\n0123456789\n!@#$%^7*()[]",
+      "font": "/home/aryan/Personal/yt/v3/assets/fonts/PlayfairDisplay.ttf",
       "fontSize": 120,
-      "penWidth": 5
+      "penWidth": 5,
+      "color": "#1a1a1a",
+      "id": "text1"
+    },
+    "art1": {
+      "kind": "image",
+      "src": "/home/aryan/Personal/yt/v1/character/manish pabrai.png",
+      "id": "art1"
+    },
+    "art2": {
+      "kind": "image",
+      "src": "/home/aryan/Personal/yt/v1/character/manish pabrai.png",
+      "id": "art2"
     }
   },
   "pages": [
-    { "id": "page1", "cameraKeyframes": [{ "t": 0, "x": 0, "y": 0, "zoom": 1 }] }
+    {
+      "id": "page1",
+      "name": "Page 1",
+      "cameraKeyframes": [
+        {
+          "t": 0,
+          "x": 0,
+          "y": 0,
+          "zoom": 1
+        },
+        {
+          "t": 18.883,
+          "x": 0,
+          "y": 0,
+          "zoom": 1
+        },
+        {
+          "t": 19.883,
+          "x": -629,
+          "y": -302,
+          "zoom": 7.443
+        },
+        {
+          "t": 21.7,
+          "x": 340,
+          "y": -307,
+          "zoom": 7.443
+        },
+        {
+          "t": 22.5,
+          "x": -618,
+          "y": -59,
+          "zoom": 7.443
+        },
+        {
+          "t": 24.383333333333333,
+          "x": 661,
+          "y": -67,
+          "zoom": 7.443
+        },
+        {
+          "t": 24.967,
+          "x": -14,
+          "y": -73,
+          "zoom": 1.075
+        },
+        {
+          "t": 32.583,
+          "x": -14,
+          "y": -73,
+          "zoom": 1.075
+        },
+        {
+          "t": 33.583,
+          "x": 226,
+          "y": 95,
+          "zoom": 3.789
+        }
+      ]
+    }
+  ],
+  "pageBreaks": [],
+  "tracks": [
+    {
+      "id": "v1",
+      "name": "Video 1",
+      "kind": "clip"
+    },
+    {
+      "id": "a1",
+      "name": "Audio 1",
+      "kind": "audio"
+    }
   ],
   "clips": [
     {
-      "id": "img",
-      "assetId": "cup",
-      "animId": "draw.outlineFill",
-      "start": 0.2,
-      "duration": 4.2,
-      "erase": { "start": 8.8, "duration": 2.4 },
-      "transform": { "x": -403, "y": -324, "scale": 0.8, "rotation": 0 }
+      "id": "clip1",
+      "assetId": "text1",
+      "animId": "draw.handwrite",
+      "pageId": "page1",
+      "trackId": "v1",
+      "start": 0,
+      "duration": 19.3,
+      "transform": {
+        "x": -759,
+        "y": -274,
+        "scale": 0.74,
+        "rotation": 0
+      },
+      "params": {}
     },
     {
-      "id": "txt",
-      "assetId": "caption",
-      "animId": "draw.handwrite",
-      "start": 4.8,
-      "duration": 3.4,
-      "erase": { "start": 9.3, "duration": 1.9 },
-      "transform": { "x": -390, "y": 400, "scale": 1, "rotation": 0 }
+      "id": "clip2",
+      "assetId": "art1",
+      "animId": "draw.imageReveal",
+      "pageId": "page1",
+      "trackId": "v1",
+      "start": 24.967,
+      "duration": 4,
+      "transform": {
+        "x": -153,
+        "y": -76,
+        "scale": 1,
+        "rotation": 0
+      },
+      "params": {}
+    },
+    {
+      "id": "clip3",
+      "assetId": "art2",
+      "animId": "draw.imageReveal",
+      "pageId": "page1",
+      "trackId": "v1",
+      "start": 29,
+      "duration": 4,
+      "transform": {
+        "x": 99,
+        "y": -63,
+        "scale": 1,
+        "rotation": 0
+      },
+      "params": {}
     }
   ],
   "audio": []

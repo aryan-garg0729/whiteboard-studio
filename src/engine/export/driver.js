@@ -8,6 +8,7 @@
 
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
+import { availableParallelism } from 'node:os';
 import { buildFfmpegArgs, parseProgress } from './ffmpeg.js';
 
 /**
@@ -27,6 +28,7 @@ export async function exportVideo(o) {
   const args = buildFfmpegArgs({
     width: o.width, height: o.height, fps: o.fps, out: o.out,
     audio: o.audio, preset: o.preset, duration: o.frames / o.fps,
+    threads: o.threads ?? Math.max(1, availableParallelism() - 1),
   });
 
   const ff = spawn(o.ffmpegPath || 'ffmpeg', args, { stdio: ['pipe', 'ignore', 'pipe'] });
@@ -52,9 +54,18 @@ export async function exportVideo(o) {
         ? rgba
         : Buffer.from(rgba.buffer, rgba.byteOffset, rgba.byteLength);
 
-      // Backpressure is mandatory. Without it a long export queues frames in
-      // stdin's internal buffer and balloons memory until it OOMs.
-      if (!ff.stdin.write(buf)) await once(ff.stdin, 'drain');
+      // Wait for the write callback even when the stream has not crossed its
+      // high-water mark. The callback is the point at which Node no longer
+      // owns the frame buffer; keeping this bounded prevents a fast renderer
+      // from accumulating native buffers behind ffmpeg.
+      await new Promise((resolve, reject) => {
+        const onError = (err) => { ff.stdin.off('error', onError); reject(err); };
+        ff.stdin.once('error', onError);
+        ff.stdin.write(buf, (err) => {
+          ff.stdin.off('error', onError);
+          if (err) reject(err); else resolve();
+        });
+      });
     }
   } finally {
     if (!pipeBroken) ff.stdin.end();

@@ -168,7 +168,7 @@ async function main() {
   await exportVideo({
     frames, width: WIDTH, height: HEIGHT, fps: FPS, out: OUT,
     audio: AUDIO ? [{ file: resolve(AUDIO), start: 0, gain: 1, duration: TOTAL }] : [],
-    renderFrameRGBA(n) { draw(n); return ctx.getImageData(0, 0, WIDTH, HEIGHT).data; },
+    renderFrameRGBA(n) { draw(n); return canvas.data(); },
     onProgress: ({ frame, total }) => process.stdout.write(`\rencoding ${frame}/${total}`),
   });
   const secs = (Date.now() - t0) / 1000;
