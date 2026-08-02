@@ -3,6 +3,7 @@ import { ANIMATIONS_FOR_KIND, pageAt, pageWindows } from '../../engine/model/pro
 import { cameraAt } from '../../engine/render/renderFrame.js';
 import { localToWorld } from '../stageGeom.js';
 import { Field, Group, Icon, Num, PATH, Soon } from './common.jsx';
+import FontPicker from './FontPicker.jsx';
 
 /**
  * Breathing room left around a clip by "Zoom to selection", as a multiple of
@@ -37,7 +38,7 @@ function TrackField({ tracks, kind, value, onChange }) {
   );
 }
 
-function ClipInspector({ ed, clip, asset, frame, fps, selection, bboxes }) {
+function ClipInspector({ ed, clip, asset, fonts, frame, fps, selection, bboxes }) {
   const t = clip.transform || {};
   const erase = clip.erase;
   const drawEnd = clip.start + clip.duration;
@@ -142,9 +143,18 @@ function ClipInspector({ ed, clip, asset, frame, fps, selection, bboxes }) {
             <input type="color" value={asset.color || '#1a1a1a'}
                    onChange={(e) => ed.patchAsset(asset.id, { color: e.target.value })} />
           </Field>
-          <div className="hint" title={asset.font || 'default'}>
-            Face: {(asset.font || 'Caveat').split('/').pop()}
-            {' — change it in the Library’s Text tab.'}
+          {/* Keyed on the asset so switching clips closes an open list rather
+              than leaving the previous clip's picker hanging open. */}
+          <Field label="Face" stack>
+            <FontPicker
+              key={asset.id}
+              fonts={fonts}
+              value={asset.font}
+              onPick={(f) => ed.patchAsset(asset.id, { font: f.path, fontFamily: f.family })}
+            />
+          </Field>
+          <div className="hint">
+            Changing the face re-lays the letters out, so the clip is traced again.
           </div>
         </Group>
       ) : (
@@ -404,7 +414,7 @@ function ProjectInspector({ ed, hands, frame, fps, selection, bboxes }) {
   );
 }
 
-export default function Inspector({ ed, selection, hands, frame, fps, bboxes }) {
+export default function Inspector({ ed, selection, hands, fonts, frame, fps, bboxes }) {
   const clip = selection?.type === 'clip'
     ? ed.doc.clips.find((c) => c.id === selection.id)
     : null;
@@ -423,8 +433,8 @@ export default function Inspector({ ed, selection, hands, frame, fps, bboxes }) 
       <div className="panel-body">
         <div className="insp">
           {clip && <ClipInspector ed={ed} clip={clip} asset={ed.doc.assets[clip.assetId]}
-                                  frame={frame} fps={fps} selection={selection}
-                                  bboxes={bboxes} />}
+                                  fonts={fonts} frame={frame} fps={fps}
+                                  selection={selection} bboxes={bboxes} />}
           {track && <AudioInspector ed={ed} index={selection.index} track={track} />}
           {brk && <PageBreakInspector ed={ed} index={selection.index} brk={brk} />}
           {key && <CameraInspector ed={ed} pageId={key.pageId} index={key.index} />}

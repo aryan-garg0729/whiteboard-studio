@@ -544,6 +544,9 @@ export default function App() {
         id: c.id, ...c.transform, start: c.start, duration: c.duration, trackId: c.trackId,
       })),
       tracks: ed.doc.tracks,
+      // Whole, not summarised: a smoke script asserting on an asset field --
+      // which face a text clip writes in, say -- has nowhere else to read it.
+      assets: ed.doc.assets,
       audio: ed.doc.audio,
       pages: ed.doc.pages,
       pageBreaks: ed.doc.pageBreaks,
@@ -711,7 +714,7 @@ export default function App() {
           onDropAsset={placeArt}
         />
 
-        <Inspector ed={ed} selection={selection} hands={hands}
+        <Inspector ed={ed} selection={selection} hands={hands} fonts={fonts}
                    frame={frame} fps={meta.fps} bboxes={bboxes} />
       </div>
 

@@ -201,7 +201,7 @@ mode (`showHand: false`) draws no sprite at all.
 | Project name | `meta.name`, independent of the filename so it survives Save As; falls back to the filename, then "Untitled", and mirrors into the window title |
 | Asset placement | Click-added assets are centred on the **camera's** framing and shrunk to fit if oversized (`placeInFrame`, `src/ui/stageGeom.js`); a stage drop still lands under the cursor |
 | Asset import | File dialog and drag-and-drop (with a byte-copy fallback when a dropped file has no path); ffprobe duration, waveform peaks, thumbnails |
-| Font picker | Nine faces **bundled in `assets/fonts/`** (manifest `fonts.json`), handwriting first, each row set in its own type via the FontFace API over `fonts:read` |
+| Font picker | Nine faces **bundled in `assets/fonts/`** (manifest `fonts.json`), handwriting first, each row set in its own type via the FontFace API over `fonts:read`. `FontPicker.jsx` serves both places: open in the Library (choosing the face is part of composing the line) and behind a disclosure in the Inspector, where it re-faces the selected clip through `patchAsset` |
 | Timeline | Named tracks with clips auto-packed into shared lanes, drag to move (horizontally to retime, vertically to re-lane), edge-resize, snapping, ruler scrub, audio waveforms |
 | Audio preview | WebAudio mixes the tracks live and is the master clock, so the drawing cannot drift from narration; per-lane and master mute are monitoring-only and never reach the document |
 | Inspector | Clip timing/transform/erase, text and asset params, composition settings |

@@ -319,7 +319,26 @@ label.check input { accent-color: var(--accent); }
 .font-list button + button { border-top: 1px solid var(--line); }
 /* One line per face, so the rows stay a scannable ladder however long the
    family name is and however wide the face sets it. */
-.font-list .font-name { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.font-name { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+
+/* The Inspector's collapsed form. The list overlays the fields below rather
+   than pushing them down: this panel is read top to bottom, and having Erase
+   jump half a screen every time the face is opened loses the reader's place. */
+.font-pick { position: relative; }
+.font-pick-head {
+  display: flex; align-items: center; gap: 6px; width: 100%; text-align: left;
+  padding: 6px 8px; font-size: 15px; line-height: 1.2; cursor: default;
+  color: var(--text); background: var(--bg-input);
+  border: 1px solid var(--line-soft); border-radius: var(--r);
+}
+.font-pick-head:hover { border-color: var(--line); }
+.font-pick-head .caret { margin-left: auto; font-size: 9px; color: var(--text-dim); }
+.font-pick-menu {
+  position: absolute; z-index: 20; left: 0; right: 0; top: calc(100% + 3px);
+  border-radius: var(--r); box-shadow: 0 10px 26px rgba(0, 0, 0, .45);
+}
+/* Opaque, not the input's near-black: this floats over other fields. */
+.font-pick-menu .font-list { max-height: 260px; background: var(--bg-panel); }
 .font-list button:hover { background: var(--bg-hover); }
 .font-list button[aria-selected="true"] { background: var(--accent); color: #fff; }
 /* Back to the UI stack: the tag is chrome, not a sample of the face. */

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Field, Group, Icon, Num, PATH, Soon } from './common.jsx';
+import { FontList } from './FontPicker.jsx';
 
 const TABS = [
   ['media', 'Media'],
@@ -90,26 +91,14 @@ function TextTab({ fonts, draft, setDraft, onAdd }) {
 
       {/* A short curated set, not the machine's font book: a couple of hundred
           system families is a search problem, and none of them writes by hand.
-          Each name is set in its own face -- the name alone tells you nothing
-          about how the letters will look, which is what you are choosing. */}
+          Open here rather than behind a disclosure as in the Inspector --
+          choosing the face is part of composing the line, not a later edit. */}
       <Field label="Font" stack>
-        <div className="font-list">
-          {fonts.map((f) => (
-            <button
-              key={f.path}
-              aria-selected={draft.font === f.path}
-              title={f.family}
-              style={f.cssFamily ? { fontFamily: `"${f.cssFamily}"` } : undefined}
-              onClick={() => setDraft({ ...draft, font: f.path, fontFamily: f.family })}
-            >
-              <span className="font-name">{f.family}</span>
-              {/* Skeletonising a modulated face gives lumpy centrelines; the
-                  script-like families are the ones that read as handwriting. */}
-              {f.hand && <span className="hand-tag">script</span>}
-            </button>
-          ))}
-          {fonts.length === 0 && <div className="lib-hint">No fonts available</div>}
-        </div>
+        <FontList
+          fonts={fonts}
+          value={draft.font}
+          onPick={(f) => setDraft({ ...draft, font: f.path, fontFamily: f.family })}
+        />
       </Field>
 
       <div className="pair">

@@ -7,6 +7,7 @@
  * parser rejects simply disappears from the list.
  *
  *   WB_SMOKE=/tmp/fonts.png \
+ *   WB_SMOKE_PROJECT=demo.project.json \
  *   WB_SMOKE_SCRIPT=scripts/smoke/font-picker.js \
  *   xvfb-run -a npx electron .
  */
@@ -49,3 +50,51 @@ await sleep(60);
 if (document.querySelector('.font-list button[aria-selected="true"]') !== rows[1]) {
   fail('clicking a face did not select it');
 }
+
+// ── the Inspector's picker re-faces a clip that already exists ──
+// The Library's copy only arms the *next* clip. Changing the face of a line
+// already on the timeline is the more common want, and it goes through
+// patchAsset, which is structural -- the clip is laid out and traced again.
+const state = () => window.__studioState();
+const textAsset = Object.entries(state().assets).find(([, a]) => a.kind === 'text');
+if (!textAsset) fail('the smoke project has no text clip to re-face');
+const [assetId] = textAsset;
+
+const block = document.querySelector('.tl-clip.text');
+if (!block) fail('no text clip in the timeline');
+block.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 1 }));
+block.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 1 }));
+await sleep(80);
+
+const head = document.querySelector('.font-pick-head');
+if (!head) fail('selecting a text clip did not show the face picker');
+if (document.querySelector('.font-pick-menu')) fail('the picker starts open');
+
+const before = state().assets[assetId].font;
+head.click();
+await sleep(60);
+const menu = [...document.querySelectorAll('.font-pick-menu .font-list button')];
+if (menu.length !== rows.length) fail('the Inspector offers a different set of faces');
+
+// Not merely "different from `before`": a clip with no font of its own is
+// already written in the first face, so picking that one would assert nothing.
+const wanted = manifest.find((f) => f.path !== (before ?? manifest[0].path));
+menu[manifest.findIndex((f) => f.path === wanted.path)].click();
+await sleep(150);
+if (state().assets[assetId].font !== wanted.path) {
+  fail(`the clip still writes in ${state().assets[assetId].font}`);
+}
+if (document.querySelector('.font-pick-menu')) fail('the list stayed open after a pick');
+const closed = document.querySelector('.font-pick-head');
+if (!closed.textContent.includes(wanted.family)) {
+  fail('the closed picker does not read back the face it just set');
+}
+if (closed.querySelector('.hand-tag')?.textContent === 'default') {
+  fail('the clip has its own face now, so it must not claim to be the default');
+}
+
+// Reported by the runner as `[script] ...`, so a silent no-op is visible: an
+// `undefined` here means the script returned before it asserted anything.
+// The runner wraps this in an async IIFE, so it is `return`, not a trailing
+// expression, that reaches the log.
+return `${rows.length} faces offered; re-faced ${assetId} as ${wanted.family}`;
