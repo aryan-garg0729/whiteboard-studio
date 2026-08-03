@@ -11,6 +11,8 @@
     "animate:image": "node scripts/animate-image.js",
     "animate:text": "node scripts/animate-text.js",
     "render:project": "node scripts/render-project.js",
+    "mcp": "node mcp/server.js",
+    "mcp:smoke": "node mcp/smoke.js",
     "app": "vite build && electron .",
     "app:dev": "VITE_DEV_SERVER_URL=http://localhost:5173 electron .",
     "dev": "vite"
@@ -19,12 +21,14 @@
   "private": true,
   "type": "module",
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@napi-rs/canvas": "^1.0.3",
     "@xmldom/xmldom": "^0.9.10",
     "opentype.js": "^2.0.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "svgpath": "^2.6.0"
+    "svgpath": "^2.6.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^6.0.5",

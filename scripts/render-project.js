@@ -5,42 +5,30 @@
  *                                  [--frames-only] [--no-hand]
  *
  * This is the generic, data-driven path: every hardcoded demo script collapses
- * into a JSON document plus this renderer. It is also the seam the editor UI
- * will sit on -- the UI's job is to produce the same JSON.
+ * into a JSON document plus this renderer.
+ *
+ * The build itself lives in `src/engine/host/nodeSession.js` -- the app spawns
+ * this script for export (electron/main.js), and the MCP server builds the same
+ * session in-process, so the two must not be able to drift. What is left here
+ * is argv, the frame pump and the two output modes.
+ *
+ * The stdout `encoding n/total` lines are a contract: electron/main.js scrapes
+ * them for its progress bar.
  */
 
-import { createCanvas, loadImage } from '@napi-rs/canvas';
+import { createCanvas } from '@napi-rs/canvas';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import opentype from 'opentype.js';
 
-import { setSurfaceFactory } from '../src/engine/render/surfaces.js';
-import { createSession, ensureSurfaces, renderFrame } from '../src/engine/render/renderFrame.js';
-import { normalizeProject, projectFrames } from '../src/engine/model/project.js';
-import { Sidecar, toAsset } from '../src/engine/sidecar/client.js';
-import { outlineText, traceText } from '../src/engine/compile/text.js';
-import { parseSvg } from '../src/engine/compile/svgDoc.js';
-import { paintVectorArt } from '../src/engine/render/vectorArt.js';
-import { compileErase } from '../src/engine/anim/erase.js';
+import { buildNodeSession, installNodeSurfaces } from '../src/engine/host/nodeSession.js';
+import { renderFrame } from '../src/engine/render/renderFrame.js';
+import { Sidecar } from '../src/engine/sidecar/client.js';
 import { exportVideo } from '../src/engine/export/driver.js';
-import { styleIdsFor } from '../src/engine/hand/styles.js';
-import { getAnimation } from '../src/engine/anim/registry.js';
-import { knockOutPaper, wantsPaperKnockout } from '../src/engine/render/artAlpha.js';
-// Imported for their registration side effect; `getAnimation` only knows what
-// has been registered.
-import outlineFill from '../src/engine/anim/outlineFill.js';
-import imageReveal from '../src/engine/anim/imageReveal.js';
-import appear, { isAppear } from '../src/engine/anim/appear.js';
-import handwrite from '../src/engine/anim/handwrite.js';
-import textReveal from '../src/engine/anim/textReveal.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-setSurfaceFactory((w, h) => {
-  const canvas = createCanvas(w, h);
-  return { canvas, ctx: canvas.getContext('2d') };
-});
+installNodeSurfaces();
 
 const argv = process.argv.slice(2);
 const arg = (n, d) => { const i = argv.indexOf(n); return i === -1 ? d : argv[i + 1]; };
@@ -57,141 +45,34 @@ const projectDir = dirname(projectPath);
 /** Asset paths are relative to the project file, so documents stay portable. */
 const rel = (p) => (isAbsolute(p) ? p : resolve(projectDir, p));
 
-/**
- * Which animation draws this clip. Preview and export must agree, so this is
- * the clip's own `animId` here exactly as it is in the app -- the pre-reveal
- * default is kept for documents written before there was a choice.
- */
-const drawableAnim = (clip) => getAnimation(clip.animId ?? 'draw.outlineFill');
-
-/**
- * Vectors skip the sidecar: the geometry is already exact, so tracing it would
- * only throw information away.
- */
-async function buildVectorClip(clip, asset) {
-  const parsed = parseSvg(readFileSync(rel(asset.src), 'utf8'), { eps: 0.2 });
-  if (!parsed.subpaths.length) throw new Error(`${asset.src}: no drawable geometry`);
-  const plan = await drawableAnim(clip).compile(toAsset(clip.assetId, parsed), {
-    brushWidth: Math.max(1.5, 2.4 / clip.transform.scale),
-    fillBrushWidth: Math.max(8, 15 / clip.transform.scale),
-    ...clip.params,
-  });
-  return { plan, traced: parsed, vector: parsed };
-}
-
-async function buildImageClip(session, sidecar, project, clip, asset) {
-  const traced = await sidecar.vectorize(rel(asset.src), asset.trace || {});
-  const plan = await drawableAnim(clip).compile(toAsset(clip.assetId, traced), {
-    brushWidth: Math.max(1.5, 2.4 / clip.transform.scale),
-    fillBrushWidth: Math.max(8, 15 / clip.transform.scale),
-    ...clip.params,
-  });
-  return { plan, traced, artSrc: rel(asset.src) };
-}
-
-async function buildTextClip(session, sidecar, project, clip, asset) {
-  const fontPath = rel(asset.font || join(ROOT, 'assets/fonts/Caveat.ttf'));
-  const buf = readFileSync(fontPath);
-  // loadSync is deprecated in opentype.js and silently returns undefined.
-  const font = opentype.parse(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
-
-  const opts = {
-    fontSize: asset.fontSize ?? 120,
-    penWidth: asset.penWidth ?? Math.max(2, (asset.fontSize ?? 120) * 0.045),
-    color: asset.color,
-  };
-
-  // Same branch as electron/prepare.js: both drawing modes retain real glyph
-  // outlines, while trace adds semantic writing guides.
-  if (clip.animId !== 'draw.handwrite') {
-    const layout = outlineText(font, asset.text, opts);
-    const plan = isAppear(clip.animId)
-      ? await getAnimation(clip.animId).compile({
-        id: clip.id, bbox: layout.bbox, inkBbox: layout.inkBbox, penWidth: opts.penWidth,
-      })
-      : await textReveal.compile({ id: clip.id, layout });
-    return { plan, layout, vector: layout };
-  }
-
-  const layout = traceText(font, asset.text, opts);
-  return { plan: await handwrite.compile({ layout }), layout, vector: layout };
-}
-
 async function main() {
-  const project = normalizeProject(JSON.parse(readFileSync(projectPath, 'utf8')));
+  const sidecar = new Sidecar({ root: ROOT, cacheDir: join(ROOT, '.cache') });
+
+  const { session, project, frames } = await buildNodeSession(
+    JSON.parse(readFileSync(projectPath, 'utf8')),
+    {
+      root: ROOT,
+      sidecar,
+      rel,
+      onClip: (clipId, asset) =>
+        console.log(`  ${clipId}: ${asset.kind} "${asset.src || asset.text}"`),
+    });
+  sidecar.stop();
+
   const { width, height, fps } = project.meta;
-  const frames = projectFrames(project);
   if (!frames) throw new Error('project has no clips, nothing to render');
 
   const showHand = !flag('--no-hand') && project.meta.showHand !== false;
+  const handStyleId = project.meta.handStyleId;
   const out = resolve(arg('--out', projectPath.replace(/\.json$/, '.mp4')));
 
   console.log(`${project.clips.length} clip(s), ${(frames / fps).toFixed(1)}s `
             + `@ ${width}x${height} ${fps}fps`);
 
-  const sidecar = new Sidecar({ root: ROOT, cacheDir: join(ROOT, '.cache') });
-
-  // The chosen hand plus every tool style: renderFrame resolves the erase
-  // sweep's hand by scanning these, so loading only the pen hand is what leaves
-  // an erase running with no hand on screen.
-  const styles = styleIdsFor(project.meta.handStyleId).map((id) =>
-    JSON.parse(readFileSync(join(ROOT, `assets/hands/${id}.json`), 'utf8')));
-  const handStyle = styles[0];
-  const images = new Map();
-  for (const style of styles) {
-    for (const src of style.sources) {
-      if (!images.has(src.file)) images.set(src.file, await loadImage(join(ROOT, src.file)));
-    }
-  }
-
-  const session = createSession({
-    hands: new Map(styles.map((s) => [s.id, s])),
-    resolveImage: (src) => images.get(src.file),
-  });
-
-  // Build every clip's plan up front so a bad asset fails before we render.
-  const artwork = [];
-  for (const clip of project.clips) {
-    const asset = project.assets[clip.assetId];
-    console.log(`  ${clip.id}: ${asset.kind} "${asset.src || asset.text}"`);
-    let built;
-    if (asset.kind === 'vector') built = await buildVectorClip(clip, asset);
-    else if (asset.kind === 'image') built = await buildImageClip(session, sidecar, project, clip, asset);
-    else built = await buildTextClip(session, sidecar, project, clip, asset);
-
-    session.plans.set(clip.id, built.plan);
-    if (clip.erase) session.erasePlans.set(clip.id, compileErase(built.plan, { id: clip.id }));
-    if (built.artSrc) artwork.push({ clipId: clip.id, src: built.artSrc, traced: built.traced });
-    if (built.vector) artwork.push({ clipId: clip.id, vector: built.vector });
-  }
-  sidecar.stop();
-
   const canvas = createCanvas(width, height);
   const ctx = canvas.getContext('2d');
-
-  // Surfaces first, then the source pixels the fill scribble reveals. Asked for
-  // directly rather than conjured by rendering a warm-up frame: a clip on a page
-  // that frame does not show would get no surfaces and no artwork.
-  ensureSurfaces(session, project);
-  for (const { clipId, src, traced, vector } of artwork) {
-    const sf = session.surfaces.get(clipId);
-    if (!sf) continue;
-    const art = sf.ensureArt().ctx;
-    if (vector) {
-      // No raster to reveal, so the vector's own fills and strokes are both
-      // the reveal artwork and what the clip settles to.
-      paintVectorArt(art, vector.regions, vector.subpaths);
-    } else {
-      const surface = sf.ensureArt();
-      surface.ctx.drawImage(await loadImage(src), 0, 0, traced.width, traced.height);
-      // The paper is knocked out of line art so the artwork carries its own
-      // silhouette; see render/artAlpha.js.
-      if (wantsPaperKnockout(traced.mode)) knockOutPaper(surface, sf.w, sf.h);
-    }
-  }
-
   const draw = (n) => renderFrame(session, project, n, ctx,
-    { width, height, showHand, handStyleId: handStyle.id });
+    { width, height, showHand, handStyleId });
 
   if (flag('--frames-only')) {
     const dir = join(ROOT, '.preview');

@@ -20,6 +20,7 @@ import opentype from 'opentype.js';
 import { parseSvg } from '../src/engine/compile/svgDoc.js';
 import { outlineText, traceText } from '../src/engine/compile/text.js';
 import { styleIdsFor } from '../src/engine/hand/styles.js';
+import { traceKey } from '../src/engine/host/nodeSession.js';
 
 const arr = (a) => (Array.isArray(a) ? a : Array.from(a));
 
@@ -96,8 +97,13 @@ export async function prepareProject(project, projectPath, sidecar) {
       // artwork the scribble reveals.
       prepared[clip.id] = serializeDrawable(parsed, null);
     } else if (asset.kind === 'image') {
-      const traced = await sidecar.vectorize(rel(asset.src), asset.trace || {});
-      prepared[clip.id] = serializeDrawable(traced, dataUrl(rel(asset.src)));
+      const path = rel(asset.src);
+      const opts = asset.trace || {};
+      // The key is what turns the sidecar's disk cache on -- it no-ops without
+      // one, so before this every rebuild re-traced every image. Hashing the
+      // bytes means an edited file invalidates itself.
+      const traced = await sidecar.vectorize(path, opts, traceKey(readFileSync(path), opts));
+      prepared[clip.id] = serializeDrawable(traced, dataUrl(path));
     } else {
       const fontPath = rel(asset.font || DEFAULT_FONT);
       const buf = readFileSync(fontPath);

@@ -20,6 +20,10 @@
 /** @typedef {{width:number, height:number}} Meta */
 /** @typedef {{x:number, y:number, zoom:number}} Camera */
 
+// Placement moved to the engine: a headless host places clips too, and needs it
+// more than the stage does -- there is no drag to correct a bad initial guess.
+export { placeInFrame } from '../engine/model/edits.js';
+
 /** local -> world */
 export function localToWorld(tr, lx, ly) {
   return { x: tr.x + lx * tr.scale, y: tr.y + ly * tr.scale };
@@ -109,40 +113,6 @@ export function resizeTransform(tr, bbox, corner, wx, wy) {
     x: anchorWorld.x - anchor[0] * scale,
     y: anchorWorld.y - anchor[1] * scale,
     scale,
-  };
-}
-
-/**
- * Where to put a newly added drawable so it lands in the middle of what the
- * viewer can actually see.
- *
- * A clip's origin is its bounding-box corner, not its centre, and world (0,0)
- * is the middle of the frame only while the camera sits at the identity. Adding
- * an asset at (0,0) after zooming in therefore drops it somewhere off screen --
- * which is exactly what it looked like.
- *
- * The scale only ever shrinks. An asset larger than the viewport is as hard to
- * find as one outside it, but enlarging a small one would be an edit nobody
- * asked for.
- *
- * @param {number[]} bbox local-space [x0, y0, x1, y1] from the compiled plan
- * @param {{x:number, y:number, zoom:number}} cam framing to centre within
- * @param {Meta} meta composition size
- * @param {number} fill fraction of the visible frame the artwork may fill
- * @returns {{x:number, y:number, scale:number}}
- */
-export function placeInFrame(bbox, cam, meta, fill = 0.8) {
-  const w = Math.abs(bbox[2] - bbox[0]);
-  const h = Math.abs(bbox[3] - bbox[1]);
-  // Zoomed in, less of the page is on screen: the visible extent in world units
-  // is the composition size divided by the zoom.
-  const scale = Math.min(1,
-    ((meta.width / cam.zoom) * fill) / Math.max(1, w),
-    ((meta.height / cam.zoom) * fill) / Math.max(1, h));
-  return {
-    x: Math.round(cam.x - ((bbox[0] + bbox[2]) / 2) * scale),
-    y: Math.round(cam.y - ((bbox[1] + bbox[3]) / 2) * scale),
-    scale: Math.round(scale * 1000) / 1000,
   };
 }
 
