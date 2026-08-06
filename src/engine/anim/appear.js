@@ -41,10 +41,24 @@ const SLIDE_AXIS = {
  * `inkBbox` -- `compileErase` reads that first precisely because an animation
  * can lay ink without laying strokes, and wiping an appeared clip has to work
  * exactly as it does for a drawn one.
+ *
+ * An asset arrives in one of two shapes, and both have to work. Text is
+ * compiled from a layout and hands over `bbox`/`inkBbox` ready-made. **Artwork
+ * is compiled from pixels** -- the hosts call `compile({id, image})`, exactly as
+ * they do for `draw.inkPaint` and `draw.stencilPaint`, and there is no bbox in
+ * that at all. Falling back to a zero box there is not a harmless default: the
+ * surfaces are allocated from `plan.bbox`, so a degenerate box means a
+ * zero-sized canvas and the clip renders as nothing whatsoever. It also gives
+ * the eraser nothing to sweep and a slide no distance to travel, since travel
+ * is a fraction of the drawable's own size.
  */
 function appearPlan(asset) {
-  const bbox = asset.bbox ?? [0, 0, 0, 0];
-  const ink = asset.inkBbox ?? inkFromRegions(asset.regions) ?? bbox;
+  const bbox = asset.bbox
+    ?? (asset.image ? [0, 0, asset.image.width, asset.image.height] : [0, 0, 0, 0]);
+  const ink = asset.inkBbox
+    ?? inkFromRegions(asset.regions)
+    ?? inkFromImage(asset.image)
+    ?? bbox;
   return {
     strokes: [],
     regions: asset.regions ?? [],
@@ -61,6 +75,35 @@ function appearPlan(asset) {
       fill: makePhase([], 0, 0, 'FILL'),
     },
   };
+}
+
+/**
+ * The bounds of the pixels that are actually there.
+ *
+ * The whole rectangle would do for showing the clip -- `revealAll` fills the
+ * surface regardless -- but not for erasing it: a cut-out PNG is mostly
+ * transparent, and sweeping the eraser across its full rectangle wipes a great
+ * deal of empty paper and takes far longer than rubbing out the drawing.
+ *
+ * Any alpha at all counts, matching `ALPHA_FLOOR` in `pixels.js`: a pixel that
+ * is faintly there is there, and the eraser has to reach it.
+ */
+function inkFromImage(image) {
+  if (!image) return null;
+  const { width, height, data } = image;
+  let x0 = Infinity; let y0 = Infinity; let x1 = -Infinity; let y1 = -Infinity;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (data[(y * width + x) * 4 + 3] < 1) continue;
+      if (x < x0) x0 = x;
+      if (x + 1 > x1) x1 = x + 1;
+      if (y < y0) y0 = y;
+      if (y + 1 > y1) y1 = y + 1;
+    }
+  }
+  // Fully transparent artwork has no ink, and must report a degenerate box so
+  // the eraser declines it rather than sweeping blank paper.
+  return Number.isFinite(x0) ? [x0, y0, x1, y1] : [0, 0, 0, 0];
 }
 
 function inkFromRegions(regions) {

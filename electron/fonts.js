@@ -18,6 +18,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import opentype from 'opentype.js';
 
+import { boldModeFor } from '../src/engine/compile/text.js';
+
 const FONT_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'assets', 'fonts');
 
 /** Absolute path of a bundled face, or null if `file` is not one of them. */
@@ -36,28 +38,41 @@ export function bundledFontPath(file) {
  * startup is cheap.
  */
 export function isUsable(path) {
+  return inspect(path) !== null;
+}
+
+/**
+ * Parse a face once and report what the picker needs to know about it.
+ *
+ * @returns {{boldMode:'variable'|'synthetic'}|null} null when the parser rejects it
+ */
+function inspect(path) {
   try {
     const b = readFileSync(path);
     const font = opentype.parse(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength));
     // A face with no outline for 'a' cannot write anything we care about.
-    return !!font.charToGlyph('a')?.path;
+    if (!font.charToGlyph('a')?.path) return null;
+    // The engine's own check, not a second opinion: carrying a `wght` axis is
+    // not enough, it has to interpolate soundly. Asking the same function the
+    // layout asks is what keeps the picker's label true.
+    return { boldMode: boldModeFor(font) };
   } catch {
-    return false;
+    return null;
   }
 }
 
 /**
- * @returns {Array<{path:string, family:string, style:string, hand:boolean}>}
+ * @returns {Array<{path:string, family:string, hand:boolean,
+ *                  boldMode:'variable'|'synthetic'}>}
  *          the bundled faces, in manifest order, minus any the parser rejects.
  */
 export function listFonts() {
   const manifest = JSON.parse(readFileSync(join(FONT_DIR, 'fonts.json'), 'utf8'));
   return manifest
-    .map((f) => ({
-      path: join(FONT_DIR, f.file),
-      family: f.family,
-      style: 'Regular',
-      hand: !!f.hand,
-    }))
-    .filter((f) => isUsable(f.path));
+    .map((f) => {
+      const path = join(FONT_DIR, f.file);
+      const info = inspect(path);
+      return info && { path, family: f.family, hand: !!f.hand, boldMode: info.boldMode };
+    })
+    .filter(Boolean);
 }

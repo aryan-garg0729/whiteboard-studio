@@ -31,6 +31,16 @@ export function paintVectorArt(ctx, regions = [], subpaths = []) {
     }
     ctx.fillStyle = region.color;
     ctx.fill('evenodd');
+    // Synthetic bold: a face with no `wght` axis cannot give us a heavier
+    // letterform, so we stroke its own outline. Round joins, because a mitre on
+    // a flattened polygon throws spikes off every shallow corner of the curve.
+    if (region.dilate > 0) {
+      ctx.strokeStyle = region.color;
+      ctx.lineWidth = region.dilate;
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+      ctx.stroke();
+    }
   }
 
   // Strokes matter as much as fills: a shape with fill="none" contributes no

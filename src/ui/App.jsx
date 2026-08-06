@@ -28,7 +28,7 @@ import Timeline from './components/Timeline.jsx';
 
 const DEFAULT_TEXT = {
   text: '', font: null, fontFamily: null,
-  fontSize: 120, penWidth: 5, color: '#1a1a1a',
+  fontSize: 120, penWidth: 5, color: '#1a1a1a', bold: false,
 };
 
 /**
@@ -395,6 +395,7 @@ export default function App() {
       fontSize: draft.fontSize,
       penWidth: draft.penWidth,
       color: draft.color,
+      bold: draft.bold,
     }, { duration: textDuration(text), ...placement() });
     setDraft((d) => ({ ...d, text: '' }));
   }, [draft, ed, placement]);

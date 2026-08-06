@@ -13,8 +13,8 @@ import { getAnimation } from '../../engine/anim/registry.js';
 const FRAME_MARGIN = 1.24;
 
 const ANIMATION_LABELS = {
-  'draw.imageReveal': 'Draw (the artwork appears)',
-  'draw.outlineFill': 'Outline, then colour (legacy)',
+  'draw.inkPaint': 'Ink outline, then colour',
+  'draw.stencilPaint': 'Paint the artwork in',
   'draw.textReveal': 'Write (letters appear)',
   'draw.handwrite': 'Trace letterforms',
   'appear.instant': 'Appear (instantly)',
@@ -103,11 +103,20 @@ function ClipInspector({ ed, clip, asset, fonts, frame, fps, selection, bboxes }
               .map((v) => <option key={v} value={v}>{ANIMATION_LABELS[v]}</option>)}
           </select>
         </Field>
-        {asset.kind !== 'text' && clip.animId === 'draw.outlineFill' && (
+        {asset.kind !== 'text' && clip.animId === 'draw.stencilPaint' && (
           <div className="hint">
-            Draws a pen-ink stand-in and crossfades to the real asset when it
-            finishes — so the picture changes at the end, and anything the pen
-            missed stays missing. “Draw” reveals the artwork itself instead.
+            The pen paints across the artwork and the real picture appears
+            underneath. Assumes nothing about the image, so it suits photographs
+            and soft gradients. The last frame is the source image, exactly —
+            nothing the pen misses is left out.
+          </div>
+        )}
+        {asset.kind !== 'text' && clip.animId === 'draw.inkPaint' && (
+          <div className="hint">
+            For artwork drawn with a black outline and flat colour fills. The pen
+            inks the outline first, following its centre, then colours each shape
+            in turn. Colours close enough together count as one — raise Colour
+            merge if a flat fill is coming out as two.
           </div>
         )}
         {asset.kind === 'text' && clip.animId === 'draw.handwrite' && (
@@ -192,10 +201,19 @@ function ClipInspector({ ed, clip, asset, fonts, frame, fps, selection, bboxes }
             <Field label="Pen"><Num value={asset.penWidth ?? 5} min={0.5} max={40} step={0.5}
               onChange={(penWidth) => ed.patchAsset(asset.id, { penWidth })} /></Field>
           </div>
-          <Field label="Ink">
-            <input type="color" value={asset.color || '#1a1a1a'}
-                   onChange={(e) => ed.patchAsset(asset.id, { color: e.target.value })} />
-          </Field>
+          <div className="pair">
+            <Field label="Ink">
+              <input type="color" value={asset.color || '#1a1a1a'}
+                     onChange={(e) => ed.patchAsset(asset.id, { color: e.target.value })} />
+            </Field>
+            <Field label="Weight">
+              <label className="check">
+                <input type="checkbox" checked={!!asset.bold}
+                       onChange={(e) => ed.patchAsset(asset.id, { bold: e.target.checked })} />
+                Bold
+              </label>
+            </Field>
+          </div>
           {/* Keyed on the asset so switching clips closes an open list rather
               than leaving the previous clip's picker hanging open. */}
           <Field label="Face" stack>

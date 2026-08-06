@@ -13,10 +13,10 @@ import { createHash } from 'node:crypto';
 import { createCanvas } from '@napi-rs/canvas';
 
 import { setSurfaceFactory } from '../src/engine/render/surfaces.js';
-import { createSession, renderFrame } from '../src/engine/render/renderFrame.js';
+import { createSession, ensureSurfaces, renderFrame } from '../src/engine/render/renderFrame.js';
 import { flattenPath } from '../src/engine/compile/svgPath.js';
-import outlineFill from '../src/engine/anim/outlineFill.js';
-import imageReveal from '../src/engine/anim/imageReveal.js';
+import stencilPaint from '../src/engine/anim/stencilPaint.js';
+import { installArt, twoToneImage } from './helpers/art.js';
 
 setSurfaceFactory((w, h) => {
   const canvas = createCanvas(w, h);
@@ -28,23 +28,23 @@ const H = 270;
 const FPS = 30;
 const ring = (...xy) => Float64Array.from(xy);
 
-const asset = {
-  id: 'shape',
-  bbox: [0, 0, 200, 200],
-  subpaths: flattenPath('M 20 20 L 180 20 L 180 180 L 20 180 Z M 60 60 L 140 140', { eps: 0.2 }),
-  regions: [{ rings: [ring(20, 20, 180, 20, 180, 180, 20, 180)], bbox: [20, 20, 180, 180], color: '#3366cc' }],
-};
+const asset = { id: 'shape', image: twoToneImage() };
+const PARAMS = { fillBrushWidth: 12 };
 
 const project = {
   meta: { fps: FPS, width: W, height: H, background: '#ffffff' },
   pages: [{ id: 'p', cameraKeyframes: [{ t: 0, x: 100, y: 100, zoom: 1 }] }],
-  clips: [{ id: 'c', assetId: 'shape', animId: 'draw.outlineFill', start: 0, duration: 1,
+  clips: [{ id: 'c', assetId: 'shape', animId: 'draw.stencilPaint', start: 0, duration: 1,
             transform: { x: 0, y: 0, scale: 1, rotation: 0 } }],
 };
 
 async function freshSession() {
   const s = createSession();
-  s.plans.set('c', await outlineFill.compile(asset, { brushWidth: 3, fillBrushWidth: 12 }));
+  s.plans.set('c', await stencilPaint.compile(asset, PARAMS));
+  // The reveal shows the artwork through a mask; with no art there is nothing
+  // to reveal and every frame hash below would be the hash of a blank page.
+  ensureSurfaces(s, project);
+  installArt(s, 'c', asset.image);
   return s;
 }
 
@@ -67,8 +67,8 @@ test('the same frame renders identically in two independent sessions', async () 
 });
 
 test('compiling twice yields byte-identical geometry', async () => {
-  const p1 = await outlineFill.compile(asset, { brushWidth: 3, fillBrushWidth: 12 });
-  const p2 = await outlineFill.compile(asset, { brushWidth: 3, fillBrushWidth: 12 });
+  const p1 = await stencilPaint.compile(asset, PARAMS);
+  const p2 = await stencilPaint.compile(asset, PARAMS);
   assert.equal(p1.strokes.length, p2.strokes.length);
   for (let i = 0; i < p1.strokes.length; i++) {
     assert.deepEqual([...p1.strokes[i].pts], [...p2.strokes[i].pts], `stroke ${i} differs`);
@@ -120,11 +120,11 @@ test('the reveal holds the same contract as the pen-ink path', async () => {
   // two places a stateful shortcut would most easily hide.
   const revealProject = {
     ...project,
-    clips: [{ ...project.clips[0], animId: 'draw.imageReveal' }],
+    clips: [{ ...project.clips[0], animId: 'draw.stencilPaint' }],
   };
   const build = async () => {
     const s = createSession();
-    s.plans.set('c', await imageReveal.compile(asset, { brushWidth: 3, fillBrushWidth: 12 }));
+    s.plans.set('c', await stencilPaint.compile(asset, PARAMS));
     return s;
   };
   const hash = (session, n) => {

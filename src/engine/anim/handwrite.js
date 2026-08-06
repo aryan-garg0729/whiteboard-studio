@@ -8,7 +8,7 @@
 
 import { makePhase, locate, makeStroke } from '../compile/geometry.js';
 import { register } from './registry.js';
-import { easeEnds, paintClosure } from './outlineFill.js';
+import { easeEnds, paintClosure } from './penStrokes.js';
 
 function boundsOf(region) {
   let x0 = Infinity; let y0 = Infinity; let x1 = -Infinity; let y1 = -Infinity;
@@ -18,7 +18,11 @@ function boundsOf(region) {
       x1 = Math.max(x1, ring[i]); y1 = Math.max(y1, ring[i + 1]);
     }
   }
-  return Number.isFinite(x0) ? [x0, y0, x1, y1] : null;
+  if (!Number.isFinite(x0)) return null;
+  // Synthetic bold lives outside the rings, so a wipe sized to the rings alone
+  // would leave the thickened stems of a bold glyph permanently unrevealed.
+  const grow = (region.dilate || 0) / 2;
+  return [x0 - grow, y0 - grow, x1 + grow, y1 + grow];
 }
 
 /** Paint a character-local left-to-right alpha wipe with a soft leading edge. */

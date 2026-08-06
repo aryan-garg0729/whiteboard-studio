@@ -5,11 +5,21 @@ export a hand-drawn-on-whiteboard video at 1080p. Requirements are in [`req.md`]
 
 **State: the rendering engine is complete, the editor is usable end to end, and an agent can
 author projects without the UI.** Import artwork or audio, add text in one of nine bundled
-faces, arrange clips on a drag-and-drop timeline, position and resize clips on the canvas,
-move the camera, and export MP4 — all from the app. Multiple pages with swipe transitions
-work, including returning to a filled page and drawing on it again. 279 tests, of which 278
-pass — the one failure is a stale assertion about a bundled example, noted under
+faces (bold or regular), arrange clips on a drag-and-drop timeline, position and resize clips
+on the canvas, move the camera, and export MP4 — all from the app. Multiple pages with swipe
+transitions work, including returning to a filled page and drawing on it again. 293 tests, of
+which 292 pass — the one failure is a stale assertion about a bundled example, noted under
 [Testing](#testing).
+
+**Artwork is drawn from pixels, not from traced geometry.** Two animations draw pictures.
+`draw.inkPaint` is the default: it inks the black linework first by running the pen down its
+centreline, then colours each connected shape in turn. `draw.stencilPaint` is the fallback for
+pictures with no linework and no flat areas — a photograph, a soft gradient — and simply paints
+across the artwork. Both work the same way underneath: every pixel belongs to exactly one colour
+group, each group closes with its own exact coverage mask, and so **the last frame of a clip is
+the source image, byte for byte** — pinned by a test over every bundled raster. The Python
+vectorizer that used to downscale, quantise and area-threshold its way to an approximation is
+deleted, and with it the last reason any host needed Python.
 
 > Earlier attempts live in `../v1` and `../v2`. They are **out of scope** — do not read or
 > reuse them. This is a clean rewrite.
@@ -51,9 +61,9 @@ npm run app                  # build + launch the Electron app
 npm run demo                 # renders demo.mp4 — draw + colour + handwrite + erase
 ```
 
-The Python sidecar is only needed to trace **raster images**. Text and SVG compile in pure
-JS, so the app, the CLI and the MCP server all work without it — they fail only on an
-`image` asset, with a message that says so.
+**Nothing needs Python to render.** The sidecar survives only for `layoutText`, the legacy
+centreline route that no host calls; images, SVG and text all compile in pure JS. Installing
+the venv is optional and no asset kind fails without it.
 
 Verified toolchain on this machine: Node 20.20.2, npm 10.8.2, system **ffmpeg 4.4.2**
 (libx264, h264_nvenc, h264_vaapi), Python 3.10.12. `potrace` and `inkscape` are **not**
@@ -71,7 +81,7 @@ installed and the system Python has **neither `skimage` nor `cv2`** — hence th
 | `npm test` | The unit suite (`node:test`, no framework) |
 | `npm run demo` | Full reel from a hardcoded script (kept for reference) |
 | `npm run demo:frames` | Same, as a PNG sequence in `.preview/` (fast to inspect) |
-| `npm run animate:image -- pic.png --seconds 6 --erase 2` | One image, traced and animated |
+| `npm run animate:image -- pic.png --seconds 6 --erase 2` | One image, sketched and painted |
 | `npm run animate:text -- "Hello" --size 200` | Handwriting only |
 | `npm run calibrate:hands` | Regenerates `assets/hands/*.json` from `hands/*.png` |
 | `node scripts/export-sample.js` | Minimal hard-coded export, for isolating export bugs |
@@ -102,15 +112,20 @@ src/
     compile/         # asset -> ordered stroke primitives (all time-independent, cacheable)
       geometry.js    #   bezier flattening (Wang), arc-length tables, locate(), tangentAt()
       order.js       #   human-looking stroke sequencing + pen-up travel moves
-      scribble.js    #   boustrophedon zig-zag infill (used by fill AND erase)
-      svgPath.js     #   SVG path data -> flattened subpaths
+      scribble.js    #   boustrophedon zig-zag infill (used by paint AND erase)
+      pixels.js      #   raster -> colour groups, boundary rings, exact coverage masks
+      paintPasses.js #   groups -> the ordered strokes the pen walks
+      centerline.js  #   a filled shape -> its centreline, and which stroke owns which pixel
+      inkPasses.js   #   linework + shapes -> the ink pass and the colour pass
+      svgPath.js     #   SVG path data -> flattened subpaths; opentype commands too
       svgDoc.js      #   whole SVG document -> contours + fillable regions (+ stroke paint)
-      text.js        #   opentype.js layout + glyph stroke ordering/orientation
+      text.js        #   opentype.js layout, weight, glyph stroke ordering/orientation
     anim/
       registry.js    #   AnimationType plugin registry; PenState contract
+      penStrokes.js  #   the brush primitives every animation shares
       appear.js      #   entrances: instant/fade/pop/slide, no pen at all
-      imageReveal.js #   images: the pen reveals the real artwork (the default)
-      outlineFill.js #   images: outline pass, then zig-zag colour pass (legacy)
+      inkPaint.js    #   THE DEFAULT for pictures: ink the outline, then colour shape by shape
+      stencilPaint.js#   fallback for photos/gradients: paint across the artwork
       textReveal.js  #   text: filled letterforms revealed left to right (the default)
       handwrite.js   #   text: guided, font-faithful letter tracing
       erase.js       #   erase modifier (not an animation type — see below)
@@ -119,8 +134,8 @@ src/
                      #   renderPage() is the per-sheet seam page transitions composite
       surfaces.js    #   per-clip canvases + committed/active raster strategy
       drawHand.js    #   hand sprite placement
-      vectorArt.js   #   a vector's own fills+strokes; reveal source AND settle target
-      artAlpha.js    #   knocks the paper out of a raster so it has a silhouette
+      vectorArt.js   #   a vector's own fills+strokes; the artwork the pen uncovers
+      rasterize.js   #   asset -> pixels; where image and vector stop being different
     model/
       project.js     #   document schema, defaults, validation; the seam every host sits on
       edits.js       #   every document transform, as pure doc -> doc; shared by UI and MCP
@@ -142,10 +157,9 @@ electron/
   prepare.js         # project -> JSON-safe payload (geometry + data URLs)
   fonts.js           # bundled face manifest, parse check, path guard
   media.js           # ffprobe duration, waveform peaks, thumbnails, hasFfmpeg()
-src/sidecar/         # Python: stdio JSON-RPC
+src/sidecar/         # Python: stdio JSON-RPC — no shipping path needs it
   server.py          #   protocol + disk cache
-  vectorize.py       #   raster -> outline contours + fillable colour regions
-  skeleton.py        #   glyph outline -> ordered centreline strokes
+  skeleton.py        #   glyph outline -> ordered centreline strokes (legacy layoutText)
 mcp/                 # MCP server: an agent authoring host
   server.js          #   tools, resources, prompts over stdio
   studio.js          #   open documents, cached sessions, transactional edits
@@ -233,15 +247,15 @@ document.
 {
   meta:   { version, name, fps, width, height, background, handStyleId, showHand },
   assets: {                          // keyed by id
-    art1:  { kind: 'image'|'vector', src, trace },
-    text1: { kind: 'text', text, font, fontSize, penWidth, color },
+    art1:  { kind: 'image'|'vector', src },
+    text1: { kind: 'text', text, font, fontSize, penWidth, color, bold },
   },
   pages:  [{ id, name, cameraKeyframes: [{ t, x, y, zoom }] }],
   pageBreaks: [{ t, pageId, transition, duration }],  // the itinerary over the sheets
   tracks: [{ id, name, kind }],      // 'clip' | 'audio'; timeline lanes, layout only
   clips: [{
     id, assetId,
-    animId,                          // registry key, e.g. 'draw.imageReveal'
+    animId,                          // registry key, e.g. 'draw.stencilPaint'
     pageId,                          // which sheet it is drawn on
     trackId,                         // which lane it is drawn on
     start, duration,                 // seconds, timeline
@@ -309,7 +323,7 @@ the failure mode is a blank frame rather than an error.
 | `transform` numerics | Spread raw. A string `scale` reaches the renderer and produces NaN geometry. |
 | `animId` vs asset kind | `ANIMATIONS_FOR_KIND` is advisory UI data the schema never consults. `draw.handwrite` on an image compiles to nothing. |
 | `meta.handStyleId` | Any string. An unknown one fails later, at manifest load. |
-| Asset extra fields | `font`, `fontSize`, `penWidth`, `color`, `lineHeight` pass through unchecked. |
+| Asset extra fields | `font`, `fontSize`, `penWidth`, `color`, `lineHeight` pass through unchecked. `bold` *is* checked. |
 | Whether `src` exists on disk | Fails at compile, not at validate. |
 
 `mcp/capabilities.js` closes all of these for the agent-facing host. The Inspector closes them
@@ -326,13 +340,14 @@ prevent.
 
 | Host | Entry | Surfaces | Compiles where |
 |---|---|---|---|
-| **Electron app** | `electron/main.js` → `src/ui/` | `OffscreenCanvas` | main process traces, renderer compiles |
+| **Electron app** | `electron/main.js` → `src/ui/` | `OffscreenCanvas` | main process reads files, renderer compiles |
 | **CLI** | `scripts/render-project.js` | `@napi-rs/canvas` | in process, via `buildNodeSession` |
 | **MCP server** | `mcp/server.js` | `@napi-rs/canvas` | in process, via `buildNodeSession` |
 
-**The app splits the work across the IPC boundary.** The renderer cannot spawn Python or read
-files, so `electron/prepare.js` turns a document into a JSON-safe "prepared" payload — plain
-arrays of geometry, images as data URLs — and `src/ui/engineHost.js` compiles plans from that.
+**The app splits the work across the IPC boundary.** The renderer cannot read files, so
+`electron/prepare.js` turns a document into a JSON-safe "prepared" payload — laid-out text,
+parsed SVG geometry, images as data URLs — and `src/ui/engineHost.js` compiles plans from that.
+Artwork analysis happens renderer-side, so no coverage mask ever crosses the wire.
 `prepare.js` and `nodeSession.js` contain the **same three-kind branch**, including the same
 sub-branch on `animId !== 'draw.handwrite'`, and comments in both flag them as deliberately
 twinned. Changing one without the other is how preview and export drift.
@@ -524,11 +539,14 @@ grid × 4 tangents test covers this.
 | Zig-zag fill | Boustrophedon with cell decomposition, seeded wobble/overshoot |
 | True-colour reveal | Scribble mask ∩ artwork — reveals real pixels, not flat colour |
 | Hand rig | Placement, rotation clamp, edge constraint, portrait arm-stretch |
-| Raster vectorization | Line-art/photo classification, k-means in Lab, `RETR_CCOMP` even-odd rings; **thin clusters become centrelines, not contours** |
-| Text write (default) | `draw.textReveal` — real filled letterforms revealed left to right under an oscillating hand, word by word. `outlineText()` keeps the glyph outline opentype already has, so **text needs no sidecar at all** and is instant |
+| Raster decomposition | Median-cut palette, every pixel labelled, boundary rings on the pixel lattice, rectangle coverage masks — pure JS, no Python, and **nothing is dropped** |
+| Text write (default) | `draw.textReveal` — real filled letterforms revealed left to right under an oscillating hand, word by word. `outlineText()` keeps the glyph outline opentype already has, so text is instant |
+| Bold text | `asset.bold`. A face with a sound `wght` axis is set to a real 700; the rest have their own outline stroked wider. Which one a face gets is *probed*, not assumed — see Known limitations |
 | Text handwriting | `draw.handwrite` — semantic character guides reveal the selected OpenType glyph outlines. Still selectable, and what every pre-existing project uses |
-| Image drawing | `draw.imageReveal` — the pen paints a mask and `composite()` shows the real artwork through it, so what is drawn *is* the asset. Each region closes with its own polygon as its scribble finishes, so no coverage hole can survive; `settles: false`, because there is nothing to change into |
-| Entrances | `appear.instant` / `fade` / `pop` / `slide` for every asset kind — the mask is filled whole and the entrance is an opacity/offset/scale applied at **blit** time (`AnimationType.present`), because the surfaces only extend 32px past the drawable and a pop would clip itself |
+| Image and SVG drawing | **`draw.inkPaint`, the default.** For pictures drawn with a black outline and flat colour fills, which is what this tool is pointed at. Colours are anchored on the artwork's own flat fills rather than cut to a count, so slight variation is one colour and the group count is discovered. The dark neutral groups are inked first: the pen runs down the linework's **centreline** while the reveal is assigned per pixel, so the outline appears at its real thickness and nothing is rounded or fattened by the nib. Then each **connected shape** is coloured in turn, largest first. An SVG is rasterised and takes the identical path |
+| The fallback | `draw.stencilPaint` — for pictures the default's assumption does not fit: a photograph, or a soft-gradient illustration with no linework and no flat areas. The pen paints across the artwork and `composite()` shows the real picture through the mask. Two styles: `zigzag` (one sweep, with `sweepAngle`/`sweepFrom`) and `colorGroups` (one colour at a time, in `groupOrder`). **It no longer sketches a pencil stencil first** — that sketch spent a third of the clip drawing something guaranteed to be erased, and on artwork whose group boundaries are its linework it laid a second, greyer outline just inside the real one. Drawing the outline first is what `inkPaint` is for |
+| Both, equally | Every pixel is owned by a group and each group closes with its exact mask, so **the last frame is the source image, byte for byte**. Neither lays pen ink, so `composite()` has nothing to knock out; `settles: false` on both, because the artwork is already on screen and compositing an image over itself raises every partial alpha |
+| Entrances | `appear.instant` / `fade` / `pop` / `slide` for every asset kind. They take an asset in **either** shape — a text layout with an explicit `bbox`, or artwork as `{id, image}` — because that is what the hosts pass for the two kinds. Getting that wrong is not cosmetic: surfaces are allocated from `plan.bbox`, so a zero box means a zero-sized canvas and the clip renders as nothing at all. The mask is filled whole and the entrance is an opacity/offset/scale applied at **blit** time (`AnimationType.present`), because the surfaces only extend 32px past the drawable and a pop would clip itself |
 | Clip params | The Inspector renders the selected animation's `paramSchema` generically, so an animation declares what it needs instead of growing bespoke controls. The MCP layer validates against the same schema |
 | SVG import | Shapes, groups, nested transforms, style/presentation attrs, fill→region, holes |
 | App shell | Electron + React; library, stage, inspector, timeline. Commands live in the **real application menu** (`buildMenu` in `electron/main.js`) and reach the renderer over `menu:command` |
@@ -540,7 +558,7 @@ grid × 4 tangents test covers this.
 | Audio preview | WebAudio mixes the tracks live and is the master clock, so the drawing cannot drift from narration; per-lane and master mute are monitoring-only and never reach the document |
 | Inspector | Clip timing/transform/erase, text and asset params, composition settings |
 | Undo/redo | Pure document transforms; drags coalesce into one history entry |
-| Settle to original | `draw.outlineFill` only: it draws a pen-ink stand-in, so it crossfades to the source asset over 0.35s once the clip ends — a pure function of `t`, so seeking is exact. An animation that already shows the artwork sets `settles: false` and is never asked |
+| Settle to original | Nothing ships that needs it any more: every drawing animation shows the real artwork from the first stroke and sets `settles: false`. The crossfade machinery (`settleAt`, `SETTLE_SECONDS`) is still in `renderFrame` for a future animation that draws a surrogate |
 | Direct manipulation | Click to select, drag to move, corner handles to resize with the opposite corner anchored |
 | Erase | Top-down sweep, `destination-out` on the clip layer only; runs on the settled artwork, with the eraser hand |
 | Export | 1080p MP4, `ffprobe`-verified h264/yuv420p/exact duration; ffmpeg audio graph. Encode throughput is content-dependent — measured 42fps on the simple demo, 23.7fps on `examples/pages`, 14fps on a four-page project with a camera move |
@@ -557,7 +575,6 @@ grid × 4 tangents test covers this.
 | **Page curl** | The four swipes and cut ship; the strip-based paper curl does not. `renderPage()` is the seam it would consume — it already hands back a whole page as a bitmap |
 | **Backward-scrub snapshots** | Backward seeks still replay from zero — see Known limitations |
 | **Editor viewport pan/zoom** | The stage fits or zooms to fixed steps; no free navigation of the *editor view*. Distinct from the document camera, which ships — that one is exported, this one would not be |
-| **Tracer tuning panel** | `vectorize.py` accepts colour count / min area; the Inspector shows them disabled |
 | **Packaging** | No electron-builder config yet |
 
 ---
@@ -566,22 +583,25 @@ grid × 4 tangents test covers this.
 
 ### Tracing and artwork
 
-- **"Any image format" oversells what's achievable.** Whiteboard animation assumes *line art*.
-  Photos quantise into many noisy regions; the classifier picks different parameters but the
-  result is still weaker than for line art. An import-time tuning panel (colour count, min
-  region area, smoothing) is the intended mitigation — `vectorize.py` already accepts all of
-  these.
-- **The reveal can only show what the vectorizer traced.** A raster pixel covered by no region
-  and no centreline has nothing to reveal it, and the vectorizer legitimately drops contours
-  under `min_area`. `artAlpha.js` shrinks the problem to invisibility rather than closing it:
-  those pixels have real alpha and the closure masks are generous, so they surface wherever a
-  neighbour's brush passes over them. Anything still missed is below the tracer's noise floor.
-- **Photographs keep their paper.** `knockOutPaper` is skipped when the classifier said `photo`
-  — a sky is not a background, and the soft ramp would eat the highlights. A photo therefore
-  relies on its regions tiling the picture, which they do.
-- **Centrelining depends on the classifier calling the image line art.** A photo keeps the
-  region-contour path, where a double outline is not meaningful anyway. A thick elongated shape
-  (a banner) stays filled by design — see `STROKE_MAX_WIDTH_FRAC`.
+- **The picture keeps its background.** There is no paper knockout any more: an image renders
+  its own pixels, white rectangle and all. That is the price of the exactness guarantee, and it
+  was chosen deliberately. A drawing on white therefore sits on a visible panel rather than
+  blending into the paper — import it with transparency if you want it cut out.
+- **A big flat area costs clip time that looks idle.** `colorGroups` paints one colour at a
+  time, and a white background is a colour: on artwork that is mostly background the visible
+  content can be finished well before the clip is. The brush widens with the square root of a
+  group's area, which turns time-proportional-to-area into time-proportional-to-diameter and
+  mostly hides it; beyond that, use fewer `colors`, or `zigzag`, which crosses colours freely.
+- **The pen's path is allowed to skip things; the coverage is not.** Rings under
+  `MIN_RING_AREA`, connected pieces under `MIN_PIECE_AREA`, and centreline spurs are all dropped
+  from where the nib *travels* — an antialiased edge quantises into thousands of one-pixel
+  islands (the bundled scribble icon makes 27557) and drawing them costs a great deal and shows
+  nothing. Their pixels are still painted, by the coverage mask, like every other pixel. Prune
+  the path, never the coverage: that distinction is the whole reason "no pruning" holds.
+- **An SVG rasterises at one pixel per user unit.** Object space is user units — that is what
+  every saved `transform.scale` was authored against — and a clip's artwork surface is allocated
+  from its object-space bbox, so there is nowhere to put a supersampled copy. Blown up far past
+  its own viewBox an SVG softens. Give it a larger viewBox if you need it sharper.
 - **The scribble reads as a clean diagonal wipe** at default brush sizes, because passes overlap
   35%. That matches reference products, but `fillBrushWidth` and `overlap` are tunable if you
   want strokes more legible.
@@ -592,6 +612,25 @@ grid × 4 tangents test covers this.
 
 ### Text
 
+- **A `wght` axis is not enough to trust a face's bold.** Four bundled faces carry one, but
+  opentype.js 2.0.0 mis-interpolates the odd glyph: Montserrat's `o` at wght 700 comes back with
+  its counter nearly as large as the letter, so a bold caption renders a thin notched ring where
+  an `o` should be. Every *other* glyph in the face doubles its ink correctly, which is why the
+  check is per glyph and the verdict per face — mixing real and synthetic bold inside one word is
+  more obviously wrong than a uniformly blunter bold. `hasSoundWeightAxis()` flattens five round
+  letters at both weights and compares the ink; a face that fails drops to synthetic bold, which
+  is the letterform's own outline stroked wider (`region.dilate`). Pure geometry, so it needs no
+  canvas and gives the same answer in every host. There is no newer opentype.js to upgrade to.
+- **Regular is pinned to wght 400, not left at the face's default.** Montserrat's axis defaults
+  to 100, so before this every caption set in it rendered Thin.
+- **Glyph outlines must not go through `path.toPathData()`.** opentype.js rounds coordinates with
+  `+(Math.round(decimalPart + 'e+' + places) + 'e-' + places)` — string concatenation — so a
+  fractional part small enough to stringify in exponential notation builds `"2.84e-14e+3"` and the
+  coordinate serialises as the literal `NaN`. The contour is then lost and the glyph silently
+  disappears. It depends on where the glyph happens to land, which is what made it read as a
+  rendering glitch: at 64px it ate Caveat's `Y` and Playfair Display's `L`. `flattenCommands()`
+  reads the command objects instead, which are always fine. A test sweeps every face at six sizes
+  in both weights and asserts nothing is dropped.
 - **Skeletonisation quality varies by font.** It extracts the medial axis of a *printed*
   letterform, so modulated serifs read as traced type. Text drawing no longer uses that route:
   both text animations preserve the selected glyph outlines.
@@ -735,8 +774,10 @@ regression test. Grouped by area; the grouping is the useful index, not the numb
    pixel no brush touched was gone for good. Three coverage holes were real: `MIN_SCRIBBLE_AREA`
    dropped small regions entirely, the scan-line loop produced **no** pass at all for a region
    thinner than half a step (a linear slash), and the last pass could stop a full step short of the
-   far edge. `draw.imageReveal` removes the dependency — the artwork carries its own alpha — and
-   the scan-line distribution is fixed for `outlineFill` too.
+   far edge. The whole class is now closed by construction: `draw.stencilPaint` gives every pixel
+   to a colour group and blits that group's exact mask, so coverage no longer depends on where the
+   brush went. The scan-line distribution fix in `scribble.js` still stands and still matters —
+   `scribbleRegion` is what the paint pass and the eraser both sweep with.
 9. **Settling blitted the whole source image**, background included, painting an opaque white
    rectangle over the paper — the drawable's bounding box, visible as a panel behind the artwork.
    The settled artwork is now intersected with ink + fill, which is exactly the marks that were
@@ -771,7 +812,9 @@ regression test. Grouped by area; the grouping is the useful index, not the numb
 
 ### Tracing and text geometry
 
-17. **Contouring a drawn line traces it twice.** The vectorizer worked on colour *regions*, and a
+17. **Contouring a drawn line traces it twice.** *(Historical — the vectorizer is gone. Kept
+    because the failure mode is a property of contouring colour regions, and anything that goes
+    back to tracing regions will hit it again.)* The vectorizer worked on colour *regions*, and a
     thin region's boundary is a loop running down one side of the line and back up the other — so
     every stroke got a visible double outline, and on thicker ink the two passes merged into a line
     far heavier than the source. Line-art clusters that are stroke-like (`elongation >= 6` and mean
@@ -917,10 +960,10 @@ regression test. Grouped by area; the grouping is the useful index, not the numb
   into the canvas could leak into an export. `StageOverlay` cannot.
 - **`amix` must set `normalize=0`** — measured on this ffmpeg, the default is exactly 6.0 dB quieter
   (half amplitude) with two inputs.
-- **A cache key is required for the sidecar's disk cache to do anything.** `vectorize(path, opts,
-  key)` no-ops the cache when `key` is falsy, and for a long time every caller passed two arguments
-  — so the cache was configured, enabled, and never used. `traceKey()` hashes file bytes plus
-  options, so an edited image invalidates itself and two copies of one picture share an entry.
+- **A cache key is required for the sidecar's disk cache to do anything.** *(Historical — nothing
+  is traced any more.)* `_cached(key, fn)` no-ops when `key` is falsy, and for a long time every
+  caller passed two arguments — so the cache was configured, enabled, and never used. Worth knowing
+  before adding a third sidecar op.
 
 ---
 
@@ -943,9 +986,10 @@ regression test. Grouped by area; the grouping is the useful index, not the numb
 | `pages.test.js` | `pageStateAt`, `pageWindows`, multi-page `renderFrame` |
 | `surfaces.test.js` | Layer reset semantics, origin-aware clearing, empty-mask compositing |
 | `erase.test.js` | Ink extent, sweep direction, the `used` flag, degenerate plans |
-| `imageReveal.test.js` | The finished frame equals the artwork, no gap survives at u=1, nothing changes when the pen stops, shared-layer scrub-back |
+| `stencilPaint.test.js` | **The finished frame is the source image, exactly** — over every bundled raster, in both modes. Plus: every pixel owned by exactly one group, a lone pixel is not merged away, there is no stencil pass and nothing is ever laid in the ink layer, sweep direction moves the start, ordering is total, compiling twice is byte-identical, no randomness, and a backward seek replays exactly |
+| `inkPaint.test.js` | The same exactness guarantee over every bundled raster and a rasterised vector, plus the two things specific to this animation: **every ink pixel belongs to exactly one stroke** (no pixel claimed twice, none left over) and **the outline reveals at full thickness** while the hand walks a one-pixel centreline. Also: slight colour variation merges to one group, tolerance monotonically merges more, one colour in three places is three shapes, specks keep their pixels without becoming shapes, `encodeRectsMulti` agrees with `encodeRects`, and the degenerate cases — no outline, outline only, one-pixel line, fully transparent |
 | `appear.test.js` | Entrances reveal everything at once, never ask for a hand, ramp opacity monotonically to exactly 1, land on true size/position, freeze after the clip, and still erase |
-| `artAlpha.test.js` | The paper ramp, saturated pales, alpha multiplied not replaced, and the putImageData/CTM trap |
+| `bold.test.js` | Which faces get a real weight and which a stroked one, the unsound-axis probe, HVAR advances, grown ink bounds, and **no glyph silently dropped at any size** |
 | `export.test.js` | ffmpeg args and audio filter graph |
 | `prepare.test.js` | The IPC boundary: payload is JSON-safe and sufficient to rebuild plans |
 
@@ -980,9 +1024,9 @@ it.
 1. **Keyframe snapshots.** Backward seeks replay from zero, and the timeline makes scrubbing the
    first thing anyone tries. Cache the composited page as an `ImageBitmap` every ~2s in an LRU and
    replay forward from the nearest one.
-2. **Tracer tuning panel.** `vectorize.py` already accepts colour count, min area and smoothing; the
-   Inspector shows them disabled. This is the intended mitigation for photographic input, and the
-   MCP server can already pass them through `update_asset`'s `trace` field.
+2. **Retire the Python sidecar.** Nothing on a shipping path calls it: `vectorize.py` is gone and
+   `skeleton.py` only serves `layoutText`, the legacy centreline route no host uses. Deleting it
+   would remove the venv, five CV dependencies and the process lifecycle in `electron/main.js`.
 3. **Packaging** with electron-builder.
 4. **Page curl**, if the swipes ever stop being enough. The "render page to bitmap" path it needs
    exists: `renderPage()` returns a whole page as pixels, and the transition compositor is where a

@@ -15,10 +15,10 @@ paper, one sheet at a time, and a camera can move over the sheet.
 ## The shape of a document
 
 - **meta** — fps, width, height, background, handStyleId, showHand.
-- **assets** — the material: an \`image\` (a file, traced into strokes), a
+- **assets** — the material: an \`image\` (a file, drawn from its pixels), a
   \`vector\` (an SVG, used exactly as drawn), or \`text\` (a string plus a font).
-  Text, font, fontSize, penWidth and colour live on the *asset*, not the clip;
-  use \`update_asset\` to reword a caption.
+  Text, font, fontSize, penWidth, colour and \`bold\` live on the *asset*, not the
+  clip; use \`update_asset\` to reword a caption or set it in bold.
 - **pages** — the sheets of paper, each with its own camera keyframes.
 - **pageBreaks** — the *itinerary* over those sheets: when the composition
   leaves one for another. A sheet may be revisited, which is what makes "go back
@@ -70,14 +70,26 @@ The message names the field and the conflict; read it rather than guessing.
 5. **A clip's lane must match its kind** — clips on clip tracks, audio on audio.
 
 Two more the schema does not check but this server does: an animation must suit
-the asset kind it is drawing (\`draw.handwrite\` is for text, \`draw.imageReveal\`
-for pictures), and \`params\` must be keys the animation actually has.
+the asset kind it is drawing (\`draw.handwrite\` is for text, \`draw.inkPaint\`
+and \`draw.stencilPaint\` for pictures), and \`params\` must be keys the animation
+actually has.
 
 ## Choosing an animation
 
-- **\`draw.imageReveal\`** — the default for pictures. The pen uncovers the real
-  artwork. Use this unless you want the older two-pass look.
-- **\`draw.outlineFill\`** — outline first, then scribble the colour in.
+- **\`draw.inkPaint\`** — **the default for pictures.** For artwork drawn the way
+  a whiteboard illustration is drawn: shapes outlined in black, filled with flat
+  colour. The pen inks the outline first by running down the middle of it, and
+  the line appears at its real thickness; then each shape is coloured in turn.
+  The finished frame is the source image exactly. Colours within
+  \`colorTolerance\` count as one; \`inkLuma\` sets how dark a group must be to
+  be treated as linework.
+- **\`draw.stencilPaint\`** — the fallback, for pictures the default's assumption
+  does not fit: a photograph, or a soft-gradient illustration with no linework
+  and no flat areas. The pen paints across the artwork and the real picture
+  appears underneath; nothing is assumed about it, and the finished frame is
+  exact too. Two styles, via \`params.mode\`: \`zigzag\` (one diagonal sweep
+  across the whole picture, with \`sweepAngle\` and \`sweepFrom\`) and
+  \`colorGroups\` (one colour at a time, in \`groupOrder\`).
 - **\`draw.handwrite\`** — the default for text. Traces real letterforms.
 - **\`draw.textReveal\`** — writes text with a left-to-right reveal.
 - **\`appear.instant\` / \`fade\` / \`pop\` / \`slide\`** — no pen at all. Use

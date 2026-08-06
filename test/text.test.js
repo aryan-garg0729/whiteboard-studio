@@ -15,7 +15,7 @@ import { compileErase, hasInk } from '../src/engine/anim/erase.js';
 import textReveal, {
   buildSegments, locateFrontier, OSCILLATION_REACH, LOOP_VARY,
 } from '../src/engine/anim/textReveal.js';
-import { easeEnds } from '../src/engine/anim/outlineFill.js';
+import { easeEnds } from '../src/engine/anim/penStrokes.js';
 
 const stroke = (pts, length) => ({ pts, length: length ?? pts.length * 10 });
 

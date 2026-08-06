@@ -17,8 +17,10 @@ import { normalizeProject, projectFrames } from '../src/engine/model/project.js'
 import { makeStroke } from '../src/engine/compile/geometry.js';
 import { prepareProject, prepareHand } from '../electron/prepare.js';
 import { HAND_STYLE_IDS, styleIdsFor } from '../src/engine/hand/styles.js';
-import outlineFill from '../src/engine/anim/outlineFill.js';
+import stencilPaint from '../src/engine/anim/stencilPaint.js';
+import { vectorPixels } from '../src/engine/render/rasterize.js';
 import { compileErase } from '../src/engine/anim/erase.js';
+import { installArt } from './helpers/art.js';
 
 setSurfaceFactory((w, h) => {
   const canvas = createCanvas(w, h);
@@ -34,6 +36,16 @@ async function prepared() {
   return { project, prepared: await prepareProject(project, svgProjectPath, null) };
 }
 
+/** The prepared vector payload, as `src/ui/engineHost.js` rebuilds it. */
+const vectorOf = (e, f64) => ({
+  width: e.width,
+  height: e.height,
+  subpaths: e.subpaths.map((sp) => ({
+    pts: f64(sp.pts), closed: sp.closed, stroke: sp.stroke, strokeWidth: sp.strokeWidth,
+  })),
+  regions: e.regions.map((r) => ({ rings: r.rings.map(f64), color: r.color })),
+});
+
 test('the prepared payload survives a JSON round trip', async () => {
   // Typed arrays are flattened deliberately: the payload must be loggable and
   // writable to disk, not merely structured-cloneable.
@@ -42,13 +54,15 @@ test('the prepared payload survives a JSON round trip', async () => {
   assert.deepEqual(round, p, 'payload must contain no non-JSON values');
 });
 
-test('a vector clip is prepared without the sidecar', async () => {
+test('a vector clip is prepared as geometry, with no raster', async () => {
   const { prepared: p } = await prepared();
   const entry = p.s;
-  assert.equal(entry.kind, 'drawable');
+  assert.equal(entry.kind, 'vector');
   assert.ok(entry.subpaths.length > 0);
   assert.ok(entry.regions.length > 0);
-  assert.equal(entry.art, null, 'vectors carry no raster; the renderer paints their fills');
+  // Only the geometry crosses the wire; the renderer rasterises and analyses it
+  // itself, exactly as buildNodeSession does.
+  assert.equal(entry.art, undefined, 'vectors carry no raster');
   assert.ok(Array.isArray(entry.subpaths[0].pts), 'geometry must be plain arrays');
   assert.ok(Array.isArray(entry.regions[0].rings[0]));
 });
@@ -64,14 +78,13 @@ test('the payload is sufficient to rebuild a plan and render a frame', async () 
 
   // Exactly what src/ui/engineHost.js does, minus the DOM.
   const f64 = (a) => Float64Array.from(a);
+  const pixels = new Map();
   for (const clip of project.clips) {
     const e = p[clip.id];
-    const plan = await outlineFill.compile({
-      id: clip.assetId,
-      bbox: e.bbox,
-      subpaths: e.subpaths.map((s) => ({ pts: f64(s.pts), closed: s.closed })),
-      regions: e.regions.map((r) => ({ rings: r.rings.map(f64), color: r.color, bbox: r.bbox })),
-    }, { brushWidth: 3, fillBrushWidth: 14 });
+    const image = vectorPixels(vectorOf(e, f64));
+    pixels.set(clip.id, image);
+    const plan = await stencilPaint.compile(
+      { id: clip.assetId, image }, { fillBrushWidth: 14 });
     assert.ok(plan.strokes.length > 0, `${clip.id} compiled to nothing`);
     session.plans.set(clip.id, plan);
   }
@@ -79,6 +92,15 @@ test('the payload is sufficient to rebuild a plan and render a frame', async () 
   const { width, height } = project.meta;
   const canvas = createCanvas(width, height);
   const ctx = canvas.getContext('2d');
+
+  // The pen lays a *mask* and `composite()` shows the artwork through it, so the
+  // artwork has to be installed or the clip renders as nothing however far the
+  // pen has travelled. One warm-up frame to create the surfaces first, which is
+  // the same order the hosts do it in.
+  renderFrame(session, project, 0, ctx, { width, height, showHand: false });
+  for (const clip of project.clips) installArt(session, clip.id, pixels.get(clip.id));
+  session.surfaces.forEach((sf) => sf.resetAll());
+
   const mid = Math.floor(projectFrames(project) * 0.6);
   renderFrame(session, project, mid, ctx, { width, height, showHand: false });
 
@@ -153,12 +175,9 @@ test('an erase sweep draws the eraser hand, not nothing', async () => {
 
   const f64 = (a) => Float64Array.from(a);
   const e = p[clip.id];
-  const plan = await outlineFill.compile({
-    id: clip.assetId,
-    bbox: e.bbox,
-    subpaths: e.subpaths.map((s) => ({ pts: f64(s.pts), closed: s.closed })),
-    regions: e.regions.map((r) => ({ rings: r.rings.map(f64), color: r.color, bbox: r.bbox })),
-  }, { brushWidth: 3, fillBrushWidth: 14 });
+  const plan = await stencilPaint.compile(
+    { id: clip.assetId, image: vectorPixels(vectorOf(e, f64)) },
+    { fillBrushWidth: 14 });
   session.plans.set(clip.id, plan);
   session.erasePlans.set(clip.id, compileErase(plan, { id: clip.id }));
 

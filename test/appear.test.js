@@ -8,6 +8,7 @@ import { paintVectorArt } from '../src/engine/render/vectorArt.js';
 import { getAnimation } from '../src/engine/anim/registry.js';
 import '../src/engine/anim/appear.js';
 import { hasInk, inkExtent, compileErase } from '../src/engine/anim/erase.js';
+import { installArt, squareImage } from './helpers/art.js';
 
 setSurfaceFactory((w, h) => {
   const canvas = createCanvas(w, h);
@@ -143,4 +144,72 @@ test('an appeared clip can still be wiped away', async () => {
   const sweep = compileErase(plan, { id: 'c1' });
   assert.ok(sweep.strokes.length > 0, 'so it must produce a sweep');
   assert.ok(sweep.width > 3, 'sized off the artwork, not the 3px stroke default');
+});
+
+// ── entrances on artwork, which is compiled from pixels ────────────────
+
+/**
+ * Every test above hands the entrance a *text-shaped* asset: an explicit
+ * `bbox` and `regions`, the way `engineHost` builds one for a caption. Artwork
+ * arrives in the other shape entirely -- both hosts compile an image or a
+ * rasterised vector as `{id, image}`, exactly as they do for `draw.inkPaint`
+ * and `draw.stencilPaint`, with no bbox anywhere in it.
+ *
+ * That gap is not cosmetic. Surfaces are allocated from `plan.bbox`, so an
+ * entrance that falls back to a zero box gets a zero-sized canvas and the clip
+ * renders as *nothing at all* -- which is precisely what happened, and what no
+ * test here caught.
+ */
+test('an entrance on artwork takes its bounds from the pixels', async () => {
+  const image = squareImage('#3366cc', 200, 20);
+  for (const id of IDS) {
+    const plan = await getAnimation(id).compile({ id: 'a', image });
+    assert.deepEqual(plan.bbox, [0, 0, 200, 200], `${id}: bbox must cover the image`);
+    // Ink is the pixels that are actually there, not the whole rectangle: a
+    // cut-out PNG is mostly transparent and the eraser must not sweep it all.
+    assert.deepEqual(plan.inkBbox, [20, 20, 180, 180], `${id}: ink is the square, not the field`);
+    assert.ok(plan.penWidth > 3, `${id}: the eraser is sized off the artwork`);
+  }
+});
+
+test('an entrance on artwork actually puts pixels on the stage', async () => {
+  const image = squareImage('#3366cc', 200, 20);
+  const project = {
+    meta: { fps: 30, width: 320, height: 240, background: '#ffffff' },
+    pages: [{ id: 'p1', cameraKeyframes: [{ t: 0, x: 0, y: 0, zoom: 1 }] }],
+    clips: [{ id: 'c', assetId: 'a1', animId: 'appear.instant', pageId: 'p1',
+              start: 0, duration: 1, transform: { x: -100, y: -100, scale: 1, rotation: 0 } }],
+  };
+  const session = createSession();
+  session.plans.set('c', await getAnimation('appear.instant').compile({ id: 'a', image }));
+  ensureSurfaces(session, project);
+  installArt(session, 'c', image);
+
+  const canvas = createCanvas(320, 240);
+  renderFrame(session, project, 15, canvas.getContext('2d'),
+    { width: 320, height: 240, showHand: false });
+
+  const d = canvas.getContext('2d').getImageData(0, 0, 320, 240).data;
+  let painted = 0;
+  for (let i = 0; i < d.length; i += 4) {
+    if (d[i] < 240 || d[i + 1] < 240 || d[i + 2] < 240) painted++;
+  }
+  assert.ok(painted > 1000, `the clip rendered as nothing: ${painted} non-background pixels`);
+});
+
+test('a slide on artwork has a real distance to travel', async () => {
+  // Travel is a fraction of the drawable's own size, so a zero bbox is not just
+  // an empty canvas -- it is also a slide that never moves.
+  const anim = getAnimation('appear.slide');
+  const plan = await anim.compile({ id: 'a', image: squareImage('#3366cc', 200, 20) });
+  const start = anim.present(plan, 0, {});
+  const end = anim.present(plan, 1, {});
+  assert.ok(Math.abs(start.dy) > 1, `the slide must start off its mark, got dy=${start.dy}`);
+  assert.ok(Math.abs(end.dy) < 1e-9, 'and land exactly on it');
+});
+
+test('fully transparent artwork has no ink, so the eraser declines it', async () => {
+  const blank = { width: 64, height: 64, data: new Uint8ClampedArray(64 * 64 * 4) };
+  const plan = await getAnimation('appear.fade').compile({ id: 'a', image: blank });
+  assert.ok(!hasInk(plan), 'there is nothing there to wipe');
 });

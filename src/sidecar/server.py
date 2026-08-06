@@ -4,7 +4,7 @@ One newline-delimited JSON object per line in each direction. stdout carries
 only protocol messages -- anything diagnostic goes to stderr, because a stray
 print would corrupt the stream.
 
-    {"id": 1, "method": "vectorize", "params": {...}}
+    {"id": 1, "method": "skeletonizeGlyph", "params": {...}}
     -> {"id": 1, "result": {...}}  |  {"id": 1, "error": {"message": ...}}
 """
 
@@ -16,7 +16,6 @@ import traceback
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import skeleton  # noqa: E402
-import vectorize  # noqa: E402
 
 CACHE_DIR = os.environ.get("WB_CACHE_DIR")
 
@@ -60,11 +59,6 @@ def op_ping(_params):
     }
 
 
-def op_vectorize(params):
-    return _cached(params.get("key"),
-                   lambda: vectorize.vectorize(params["path"], params.get("opts")))
-
-
 def op_skeletonize_glyph(params):
     return _cached(params.get("key"), lambda: skeleton.skeletonize_glyph(
         params["commands"],
@@ -93,7 +87,6 @@ def op_skeletonize_batch(params):
 
 OPS = {
     "ping": op_ping,
-    "vectorize": op_vectorize,
     "skeletonizeGlyph": op_skeletonize_glyph,
     "skeletonizeBatch": op_skeletonize_batch,
 }

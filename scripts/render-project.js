@@ -23,7 +23,6 @@ import { fileURLToPath } from 'node:url';
 
 import { buildNodeSession, installNodeSurfaces } from '../src/engine/host/nodeSession.js';
 import { renderFrame } from '../src/engine/render/renderFrame.js';
-import { Sidecar } from '../src/engine/sidecar/client.js';
 import { exportVideo } from '../src/engine/export/driver.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -46,18 +45,15 @@ const projectDir = dirname(projectPath);
 const rel = (p) => (isAbsolute(p) ? p : resolve(projectDir, p));
 
 async function main() {
-  const sidecar = new Sidecar({ root: ROOT, cacheDir: join(ROOT, '.cache') });
-
+  // No sidecar: nothing on this path needs Python any more.
   const { session, project, frames } = await buildNodeSession(
     JSON.parse(readFileSync(projectPath, 'utf8')),
     {
       root: ROOT,
-      sidecar,
       rel,
       onClip: (clipId, asset) =>
         console.log(`  ${clipId}: ${asset.kind} "${asset.src || asset.text}"`),
     });
-  sidecar.stop();
 
   const { width, height, fps } = project.meta;
   if (!frames) throw new Error('project has no clips, nothing to render');

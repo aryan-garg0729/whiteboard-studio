@@ -161,7 +161,7 @@ server.registerTool('write_svg', {
   title: 'Write SVG artwork',
   description:
     'Write SVG markup into the workspace and return a path usable as a vector asset. '
-    + 'Vector artwork skips the tracer entirely -- the geometry is drawn exactly as written -- '
+    + 'Vector artwork keeps its own geometry as the artwork it paints -- exactly as written -- '
     + 'so this is the best way to make diagrams, arrows, boxes and icons, and it needs no '
     + 'image files and no Python. Keep paths simple: every subpath becomes a pen stroke.',
   inputSchema: {
@@ -214,6 +214,7 @@ server.registerTool('add_clip', {
     fontSize: z.number().optional(),
     penWidth: z.number().optional(),
     color: z.string().optional(),
+    bold: z.boolean().optional().describe('for kind=text'),
     animId: z.string().optional(),
     duration: z.number().min(0.01).optional(),
     transform: z.object({
@@ -222,7 +223,7 @@ server.registerTool('add_clip', {
     }).optional(),
     params: z.record(z.string(), z.any()).optional(),
   },
-}, tool(async ({ name, kind, text, src, font, fontSize, penWidth, color, ...rest }) => {
+}, tool(async ({ name, kind, text, src, font, fontSize, penWidth, color, bold, ...rest }) => {
   if (kind === 'text' && !text) throw new edits.EditError('kind=text needs `text`');
   if (kind !== 'text' && !src) throw new edits.EditError(`kind=${kind} needs \`src\``);
 
@@ -231,7 +232,8 @@ server.registerTool('add_clip', {
         ...(font ? { font: readablePath(font) } : {}),
         ...(fontSize !== undefined ? { fontSize } : {}),
         ...(penWidth !== undefined ? { penWidth } : {}),
-        ...(color ? { color } : {}) }
+        ...(color ? { color } : {}),
+        ...(bold !== undefined ? { bold } : {}) }
     : { kind, src: readablePath(src) };
 
   const duration = rest.duration
@@ -270,9 +272,9 @@ server.registerTool('update_clip', {
 server.registerTool('update_asset', {
   title: 'Update asset',
   description:
-    'Change the material a clip draws: the words of a caption, its font, size, pen width or '
-    + 'colour, or an image\'s trace options. This is how you reword text — the string lives on '
-    + 'the asset, not the clip. Every clip sharing the asset changes with it.',
+    'Change the material a clip draws: the words of a caption, its font, size, pen width, '
+    + 'colour or weight, or an image\'s source file. This is how you reword text — the string '
+    + 'lives on the asset, not the clip. Every clip sharing the asset changes with it.',
   inputSchema: {
     name: z.string(),
     assetId: z.string(),
@@ -281,8 +283,8 @@ server.registerTool('update_asset', {
     fontSize: z.number().optional(),
     penWidth: z.number().optional(),
     color: z.string().optional(),
+    bold: z.boolean().optional(),
     src: z.string().optional(),
-    trace: z.record(z.string(), z.any()).optional(),
   },
 }, tool(async ({ name, assetId, ...patch }) => {
   const clean = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined));
@@ -411,6 +413,7 @@ server.registerTool('storyboard', {
       font: z.string().optional(),
       fontSize: z.number().optional(),
       color: z.string().optional(),
+      bold: z.boolean().optional().describe('set the caption in bold'),
       page: z.boolean().optional().describe('start this beat on a fresh sheet'),
       transition: z.enum([...TRANSITIONS]).optional(),
       erase: z.object({

@@ -17,7 +17,8 @@ import { fileURLToPath } from 'node:url';
 import { setSurfaceFactory } from '../src/engine/render/surfaces.js';
 import { createSession, renderFrame } from '../src/engine/render/renderFrame.js';
 import { flattenPath } from '../src/engine/compile/svgPath.js';
-import outlineFill from '../src/engine/anim/outlineFill.js';
+import stencilPaint from '../src/engine/anim/stencilPaint.js';
+import { vectorPixels } from '../src/engine/render/rasterize.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -39,8 +40,8 @@ const WIDTH = 1920;
 const HEIGHT = 1080;
 const FPS = 30;
 
-// A simple house: outline contours plus two fillable regions. Stands in for
-// vectorizer output until the Python sidecar lands.
+// A simple house. Rasterised below and then planned from its pixels, which is
+// exactly what a real image or SVG goes through.
 const HOUSE_OUTLINE = 'M 200 400 L 200 700 L 600 700 L 600 400 Z '
                     + 'M 160 410 L 400 220 L 640 410 Z '
                     + 'M 330 700 L 330 560 L 450 560 L 450 700 Z '
@@ -73,7 +74,7 @@ const project = {
   clips: [{
     id: 'c1',
     assetId: 'house',
-    animId: 'draw.outlineFill',
+    animId: 'draw.stencilPaint',
     start: 0,
     duration: FRAMES / FPS,
     transform: { x: 0, y: 0, scale: 1, rotation: 0 },
@@ -94,7 +95,9 @@ async function main() {
     resolveImage: (src) => images.get(src.file),
   });
 
-  const plan = await outlineFill.compile(asset, { brushWidth: 3, fillBrushWidth: 16 });
+  const plan = await stencilPaint.compile(
+    { id: asset.id, image: vectorPixels({ width: 660, height: 720, ...asset }) },
+    { fillBrushWidth: 16 });
   session.plans.set('c1', plan);
 
   // Paint the artwork the fill reveals. In the real pipeline this comes from

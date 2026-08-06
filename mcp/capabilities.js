@@ -51,6 +51,9 @@ export function fonts() {
     // Which faces look handwritten; a whiteboard caption in Open Sans reads as
     // a slide, not as something drawn.
     handwriting: f.hand,
+    // 'variable' faces carry a real weight axis; on a 'synthetic' one, bold is
+    // the letterform's own outline stroked wider, which is blunter but works.
+    boldMode: f.boldMode,
   }));
 }
 

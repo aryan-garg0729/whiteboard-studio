@@ -13,7 +13,8 @@ import { setSurfaceFactory } from '../src/engine/render/surfaces.js';
 import { createSession, renderFrame } from '../src/engine/render/renderFrame.js';
 import { flattenPath } from '../src/engine/compile/svgPath.js';
 import { exportVideo } from '../src/engine/export/driver.js';
-import outlineFill from '../src/engine/anim/outlineFill.js';
+import stencilPaint from '../src/engine/anim/stencilPaint.js';
+import { vectorPixels } from '../src/engine/render/rasterize.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -55,7 +56,7 @@ const asset = {
 const project = {
   meta: { fps: FPS, width: WIDTH, height: HEIGHT, background: '#fdfdfb' },
   pages: [{ id: 'p1', cameraKeyframes: [{ t: 0, x: 400, y: 460, zoom: 1.25 }] }],
-  clips: [{ id: 'c1', assetId: 'house', animId: 'draw.outlineFill',
+  clips: [{ id: 'c1', assetId: 'house', animId: 'draw.stencilPaint',
             start: 0, duration: SECONDS, transform: { x: 0, y: 0, scale: 1, rotation: 0 } }],
 };
 
@@ -68,7 +69,9 @@ async function main() {
     hands: new Map([[handStyle.id, handStyle]]),
     resolveImage: (src) => images.get(src.file),
   });
-  session.plans.set('c1', await outlineFill.compile(asset, { brushWidth: 3, fillBrushWidth: 16 }));
+  session.plans.set('c1', await stencilPaint.compile(
+    { id: asset.id, image: vectorPixels({ width: 660, height: 720, ...asset }) },
+    { fillBrushWidth: 16 }));
 
   const canvas = createCanvas(WIDTH, HEIGHT);
   const ctx = canvas.getContext('2d');

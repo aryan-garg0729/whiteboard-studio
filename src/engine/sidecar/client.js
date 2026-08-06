@@ -84,9 +84,6 @@ export class Sidecar {
 
   ping() { return this.call('ping'); }
 
-  /** @param {string} path image file @param {Object} [opts] see vectorize.py */
-  vectorize(path, opts, key) { return this.call('vectorize', { path, opts, key }); }
-
   skeletonizeGlyph(commands, opts = {}) {
     return this.call('skeletonizeGlyph', { commands, ...opts });
   }
@@ -104,27 +101,3 @@ export class Sidecar {
   }
 }
 
-/**
- * Convert a vectorize() result into the asset shape the animation registry
- * expects: Float64Array rings and packed subpath points.
- */
-export function toAsset(id, result) {
-  return {
-    id,
-    bbox: result.bbox,
-    // Carried through for the artwork's paper knockout; see render/artAlpha.js.
-    traceMode: result.mode,
-    subpaths: result.subpaths.map((s) => ({
-      pts: Float64Array.from(s.pts),
-      closed: s.closed !== false,
-      // Centrelined line art carries its own weight and ink colour.
-      ...(s.width ? { width: s.width } : {}),
-      ...(s.color ? { color: s.color } : {}),
-    })),
-    regions: result.regions.map((r) => ({
-      rings: r.rings.map((ring) => Float64Array.from(ring)),
-      bbox: r.bbox,
-      color: r.color,
-    })),
-  };
-}

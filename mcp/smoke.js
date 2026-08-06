@@ -125,7 +125,7 @@ async function main() {
   // A rejected edit must leave the document exactly as it was.
   const bad = await client.callTool({
     name: 'update_clip',
-    arguments: { name: NAME, clipId: firstText.id, animId: 'draw.imageReveal' },
+    arguments: { name: NAME, clipId: firstText.id, animId: 'draw.stencilPaint' },
   });
   assert.equal(bad.isError, true);
   assert.match(text(bad), /does not suit a text asset/);

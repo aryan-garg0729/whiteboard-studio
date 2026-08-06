@@ -16,7 +16,7 @@
 
 import { makePhase, locate, tangentAt, makeStroke } from '../compile/geometry.js';
 import { scribbleRegion, hashSeed } from '../compile/scribble.js';
-import { easeEnds, strokePartial, strokeWhole } from './outlineFill.js';
+import { easeEnds, strokePartial, strokeWhole } from './penStrokes.js';
 
 /** Eraser head is much wider than a pen nib. */
 export const ERASER_WIDTH_FACTOR = 6;

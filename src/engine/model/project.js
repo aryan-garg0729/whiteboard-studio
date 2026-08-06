@@ -26,9 +26,52 @@ export const ASSET_KINDS = new Set(['image', 'vector', 'text']);
 
 /** Animation ids that ship today. Kept as data so the check stays honest. */
 export const KNOWN_ANIMATIONS = new Set([
-  'draw.imageReveal', 'draw.outlineFill', 'draw.textReveal', 'draw.handwrite',
+  'draw.stencilPaint', 'draw.inkPaint', 'draw.textReveal', 'draw.handwrite',
   'appear.instant', 'appear.fade', 'appear.pop', 'appear.slide',
 ]);
+
+/**
+ * Retired animation ids, and what they become.
+ *
+ * `draw.imageReveal` and `draw.outlineFill` were the two ways artwork used to be
+ * drawn, both planned from traced geometry. `draw.stencilPaint` replaces both.
+ * Documents are migrated on load rather than rejected: the examples, every
+ * project anyone has saved, and the MCP scripts in the wild all name the old
+ * ids, and a document that used to render should not stop rendering.
+ */
+export const RETIRED_ANIMATIONS = {
+  'draw.imageReveal': 'draw.stencilPaint',
+  'draw.outlineFill': 'draw.stencilPaint',
+};
+
+/**
+ * Parameter names that moved with them.
+ *
+ * `scribbleAngle` is the same quantity as `sweepAngle`, so it is renamed. The
+ * rest are dropped rather than mapped onto something they are not: `brushWidth`
+ * and `outlineShare` both described the pencil stencil, which no longer exists
+ * -- `draw.stencilPaint` paints and nothing else -- and `orderStyle` ordered its
+ * contours. Dropping is the honest migration when the thing a parameter
+ * controlled is gone; carrying it onto the nearest survivor would silently
+ * change what a document does.
+ *
+ * These apply only to documents naming a *retired* animation id, so nothing
+ * here can reach `draw.inkPaint`, which has an `outlineShare` of its own.
+ */
+const RETIRED_PARAMS = { scribbleAngle: 'sweepAngle' };
+const DROPPED_PARAMS = new Set(['orderStyle', 'brushWidth', 'outlineShare', 'pencilWidth']);
+
+/** Bring a clip's animation and parameters up to date, in place of rejecting it. */
+export function migrateAnimation(animId, params) {
+  const id = RETIRED_ANIMATIONS[animId] || animId;
+  if (id === animId) return { animId: id, params };
+  const out = {};
+  for (const [k, v] of Object.entries(params || {})) {
+    if (DROPPED_PARAMS.has(k)) continue;
+    out[RETIRED_PARAMS[k] || k] = v;
+  }
+  return { animId: id, params: out };
+}
 
 /** Entrances: no pen, no drawing, so they suit every asset kind alike. */
 const APPEAR = ['appear.instant', 'appear.fade', 'appear.pop', 'appear.slide'];
@@ -42,8 +85,12 @@ const APPEAR = ['appear.instant', 'appear.fade', 'appear.pop', 'appear.slide'];
  */
 export const ANIMATIONS_FOR_KIND = {
   // The guided text trace is first because it is the default for new captions.
-  image: ['draw.imageReveal', 'draw.outlineFill', ...APPEAR],
-  vector: ['draw.imageReveal', 'draw.outlineFill', ...APPEAR],
+  // `inkPaint` first because it is the default: this tool is pointed at
+  // whiteboard artwork, and inking the real outline reads as drawing in a way
+  // a scribble sweep does not. `stencilPaint` is the fallback that assumes
+  // nothing -- a photograph, or a soft-gradient illustration.
+  image: ['draw.inkPaint', 'draw.stencilPaint', ...APPEAR],
+  vector: ['draw.inkPaint', 'draw.stencilPaint', ...APPEAR],
   text: ['draw.handwrite', 'draw.textReveal', ...APPEAR],
 };
 
@@ -198,6 +245,9 @@ export function normalizeProject(raw) {
     if (a.kind === 'text' && typeof a.text !== 'string') {
       throw new ProjectError(`${at}.text`, 'required for text assets');
     }
+    if (a.bold !== undefined && typeof a.bold !== 'boolean') {
+      throw new ProjectError(`${at}.bold`, 'expected true or false');
+    }
     // .svg routed through the raster tracer would hit cv2.imread and fail, so
     // normalise the kind from the extension rather than trusting the author.
     const kind = a.kind === 'image' && /\.svg$/i.test(a.src || '') ? 'vector' : a.kind;
@@ -339,7 +389,10 @@ export function normalizeProject(raw) {
     if (!assets[c.assetId]) {
       throw new ProjectError(`${at}.assetId`, `no such asset ${JSON.stringify(c.assetId)}`);
     }
-    if (!KNOWN_ANIMATIONS.has(c.animId)) {
+    // Migrate before validating, so a document naming a retired animation loads
+    // as its replacement instead of being rejected.
+    const migrated = migrateAnimation(c.animId, c.params);
+    if (!KNOWN_ANIMATIONS.has(migrated.animId)) {
       throw new ProjectError(`${at}.animId`,
         `unknown animation ${JSON.stringify(c.animId)}; expected one of ${[...KNOWN_ANIMATIONS].join(', ')}`);
     }
@@ -347,13 +400,13 @@ export function normalizeProject(raw) {
     const clip = {
       id,
       assetId: c.assetId,
-      animId: c.animId,
+      animId: migrated.animId,
       pageId: c.pageId || pages[0].id,
       trackId: trackFor(c.trackId, 'clip', at),
       start: num(c.start, 0, `${at}.start`, { min: 0 }),
       duration: num(c.duration, 3, `${at}.duration`, { min: 0.01 }),
       transform: { ...DEFAULTS.transform, ...(c.transform || {}) },
-      params: c.params || {},
+      params: migrated.params || {},
     };
 
     if (c.erase) {

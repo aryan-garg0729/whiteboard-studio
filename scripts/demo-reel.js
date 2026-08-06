@@ -19,12 +19,12 @@ import opentype from 'opentype.js';
 
 import { setSurfaceFactory } from '../src/engine/render/surfaces.js';
 import { createSession, renderFrame } from '../src/engine/render/renderFrame.js';
-import { Sidecar, toAsset } from '../src/engine/sidecar/client.js';
 import { traceText } from '../src/engine/compile/text.js';
 import { paintVectorArt } from '../src/engine/render/vectorArt.js';
 import { compileErase } from '../src/engine/anim/erase.js';
 import { exportVideo } from '../src/engine/export/driver.js';
-import outlineFill from '../src/engine/anim/outlineFill.js';
+import stencilPaint from '../src/engine/anim/stencilPaint.js';
+import { imagePixels } from '../src/engine/render/rasterize.js';
 import handwrite from '../src/engine/anim/handwrite.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -61,14 +61,10 @@ const T = {
 const TOTAL = T.eraseStart + T.eraseDur + T.tail;
 
 async function main() {
-  const sidecar = new Sidecar({ root: ROOT, cacheDir: join(ROOT, '.cache') });
-
   // --- image ---
-  console.log(`tracing ${IMAGE}`);
-  const traced = await sidecar.vectorize(IMAGE, {});
-  console.log(`  mode=${traced.mode}  regions=${traced.regions.length}`
-            + `  contours=${traced.subpaths.length}`);
-  const imgAsset = toAsset('img', traced);
+  console.log(`reading ${IMAGE}`);
+  const source = await loadImage(IMAGE);
+  const imgAsset = { id: 'img', image: imagePixels(source, source.width, source.height) };
 
   // --- text ---
   const fontBuf = readFileSync(FONT);
@@ -77,12 +73,11 @@ async function main() {
   const FONT_SIZE = 120;
   const layout = traceText(font, TEXT, { fontSize: FONT_SIZE, penWidth: 5 });
   console.log(`caption "${TEXT}": ${layout.guides.filter((s) => !s.lift).length} guide strokes`);
-  sidecar.stop();
 
   // --- layout on the page ---
   // Image sits in the upper half, caption centred beneath it.
-  const aw = traced.width;
-  const ah = traced.height;
+  const aw = source.width;
+  const ah = source.height;
   const fit = Math.min((WIDTH * 0.42) / aw, (HEIGHT * 0.52) / ah);
   const imgW = aw * fit;
   const imgH = ah * fit;
@@ -93,7 +88,7 @@ async function main() {
     pages: [{ id: 'p1', cameraKeyframes: [{ t: 0, x: 0, y: 0, zoom: 1 }] }],
     clips: [
       {
-        id: 'img', assetId: 'img', animId: 'draw.outlineFill',
+        id: 'img', assetId: 'img', animId: 'draw.stencilPaint',
         start: T.imageStart, duration: T.imageDur,
         erase: { start: T.eraseStart, duration: T.eraseDur },
         transform: { x: -imgW / 2, y: imgY, scale: fit, rotation: 0 },
@@ -123,8 +118,7 @@ async function main() {
     resolveImage: (src) => images.get(src.file),
   });
 
-  const imgPlan = await outlineFill.compile(imgAsset, {
-    brushWidth: Math.max(1.5, 2.4 / fit),
+  const imgPlan = await stencilPaint.compile(imgAsset, {
     fillBrushWidth: Math.max(8, 15 / fit),
   });
   const txtPlan = await handwrite.compile({ layout });

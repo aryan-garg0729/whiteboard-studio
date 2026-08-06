@@ -99,6 +99,7 @@ export async function storyboard({ doc, beats, ctx }) {
           ...(beat.font ? { font: beat.font } : {}),
           ...(beat.fontSize ? { fontSize: beat.fontSize } : {}),
           ...(beat.color ? { color: beat.color } : {}),
+          ...(beat.bold !== undefined ? { bold: beat.bold } : {}),
         },
         animId: beat.animId && beat.animId.startsWith('draw.') && !art
           ? beat.animId
@@ -115,7 +116,7 @@ export async function storyboard({ doc, beats, ctx }) {
         asset: { kind: beat.svg ? 'vector' : 'image', src: art },
         animId: beat.animId && !beat.animId.startsWith('draw.handwrite')
           ? beat.animId
-          : 'draw.imageReveal',
+          : 'draw.inkPaint',
         duration: beat.seconds ?? ART_SECONDS,
         band: both ? { from: CAPTION_BAND, to: 1 } : { from: 0.1, to: 0.9 },
         erase: beat.erase,

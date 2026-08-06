@@ -184,6 +184,8 @@ function travelStroke(a, b, bulge = 0.18) {
   return makeStroke(pts, { kind: 'TRAVEL', lift: true, width: 0 });
 }
 
+export { travelStroke };
+
 /**
  * Sequence subpaths into a drawable stroke list.
  *

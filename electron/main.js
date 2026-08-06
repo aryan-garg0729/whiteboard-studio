@@ -176,7 +176,7 @@ function absolutize(project, dir) {
 /** Normalise + prepare a document. The one path every project load goes through. */
 async function prepare(raw, basePath) {
   const project = absolutize(normalizeProject(raw), dirname(basePath));
-  const prepared = await prepareProject(project, basePath, getSidecar());
+  const prepared = await prepareProject(project, basePath);
   return {
     project,
     prepared,

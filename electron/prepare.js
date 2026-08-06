@@ -1,11 +1,11 @@
 /**
  * Asset preparation, main-process side.
  *
- * The renderer cannot spawn Python or read arbitrary files, so the main process
- * turns a project document into a JSON-safe "prepared" payload: plain arrays of
- * geometry plus data URLs for any pixels. The renderer then compiles and
- * renders entirely on its own, which keeps the engine identical between the
- * app, the CLI and the tests.
+ * The renderer cannot read arbitrary files, so the main process turns a project
+ * document into a JSON-safe "prepared" payload: laid-out text, parsed SVG
+ * geometry, and data URLs for any pixels. The renderer then compiles and renders
+ * entirely on its own, which keeps the engine identical between the app, the CLI
+ * and the tests.
  *
  * Typed arrays are flattened to plain arrays deliberately -- structured clone
  * would carry Float64Array across, but the payload also has to survive being
@@ -20,7 +20,6 @@ import opentype from 'opentype.js';
 import { parseSvg } from '../src/engine/compile/svgDoc.js';
 import { outlineText, traceText } from '../src/engine/compile/text.js';
 import { styleIdsFor } from '../src/engine/hand/styles.js';
-import { traceKey } from '../src/engine/host/nodeSession.js';
 
 const arr = (a) => (Array.isArray(a) ? a : Array.from(a));
 
@@ -44,45 +43,36 @@ export function dataUrl(path) {
   return `data:${MIME[ext] || 'image/png'};base64,${readFileSync(path).toString('base64')}`;
 }
 
-function serializeDrawable(traced, art) {
+/**
+ * A vector, as the renderer needs it.
+ *
+ * Only the geometry crosses the wire. The renderer rasterises it and analyses
+ * the pixels itself, exactly as the CLI does -- sending an analysis instead
+ * would mean shipping every group's coverage mask through IPC for no gain, and
+ * would give the app a second place where a plan can be built.
+ */
+function serializeVector(parsed) {
   return {
-    kind: 'drawable',
-    bbox: arr(traced.bbox),
-    // Which way the vectorizer read the image. The renderer needs it to decide
-    // whether the artwork has paper to knock out: line art is ink on white and
-    // its background means nothing, a photograph's light pixels are the picture.
-    // Named `traceMode` because `mode` is already the text payload's own
-    // discriminator, and one key meaning two things across `kind`s is a trap.
-    traceMode: traced.mode ?? null,
-    detectedTraceMode: traced.detectedMode ?? null,
-    width: traced.width,
-    height: traced.height,
-    subpaths: traced.subpaths.map((s) => ({
+    kind: 'vector',
+    bbox: arr(parsed.bbox),
+    width: parsed.width,
+    height: parsed.height,
+    subpaths: parsed.subpaths.map((s) => ({
       pts: arr(s.pts),
       closed: s.closed !== false,
       // Spread rather than assign `undefined`: JSON.stringify drops undefined
       // keys, so emitting them makes the payload fail its own round trip.
-      // `stroke`/`strokeWidth` are the SVG's own paint, used when a clip
-      // settles; `width`/`color` are a traced centreline's own weight.
       ...(s.stroke ? { stroke: s.stroke, strokeWidth: s.strokeWidth ?? 1 } : {}),
-      ...(s.width ? { width: s.width } : {}),
-      ...(s.color ? { color: s.color } : {}),
     })),
-    regions: traced.regions.map((r) => ({
-      rings: r.rings.map(arr),
-      color: r.color,
-      bbox: arr(r.bbox),
-    })),
-    art,
+    regions: parsed.regions.map((r) => ({ rings: r.rings.map(arr), color: r.color })),
   };
 }
 
 /**
  * @param {Object} project a normalised project
  * @param {string} projectPath used to resolve relative asset paths
- * @param {Object} sidecar a started Sidecar instance
  */
-export async function prepareProject(project, projectPath, sidecar) {
+export async function prepareProject(project, projectPath) {
   const dir = dirname(projectPath);
   const rel = (p) => (isAbsolute(p) ? p : resolve(dir, p));
 
@@ -93,17 +83,12 @@ export async function prepareProject(project, projectPath, sidecar) {
     if (asset.kind === 'vector') {
       const parsed = parseSvg(readFileSync(rel(asset.src), 'utf8'), { eps: 0.2 });
       if (!parsed.subpaths.length) throw new Error(`${asset.src}: no drawable geometry`);
-      // No raster exists, so the renderer paints the vector's own fills as the
-      // artwork the scribble reveals.
-      prepared[clip.id] = serializeDrawable(parsed, null);
+      prepared[clip.id] = serializeVector(parsed);
     } else if (asset.kind === 'image') {
-      const path = rel(asset.src);
-      const opts = asset.trace || {};
-      // The key is what turns the sidecar's disk cache on -- it no-ops without
-      // one, so before this every rebuild re-traced every image. Hashing the
-      // bytes means an edited file invalidates itself.
-      const traced = await sidecar.vectorize(path, opts, traceKey(readFileSync(path), opts));
-      prepared[clip.id] = serializeDrawable(traced, dataUrl(path));
+      // Just the pixels. Nothing is traced here any more -- the renderer decodes
+      // the data URL, reads the pixels back and plans the drawing from those,
+      // which is the same code path `buildNodeSession` takes.
+      prepared[clip.id] = { kind: 'image', art: dataUrl(rel(asset.src)) };
     } else {
       const fontPath = rel(asset.font || DEFAULT_FONT);
       const buf = readFileSync(fontPath);
@@ -122,6 +107,7 @@ export async function prepareProject(project, projectPath, sidecar) {
         fontSize: asset.fontSize ?? 120,
         penWidth: asset.penWidth ?? Math.max(2, (asset.fontSize ?? 120) * 0.045),
         color: asset.color,
+        bold: !!asset.bold,
       };
 
       // Both text drawing modes reveal real outlines. Trace additionally gets
@@ -137,7 +123,10 @@ export async function prepareProject(project, projectPath, sidecar) {
           height: layout.height,
           penWidth: opts.penWidth,
           lines: layout.lines,
-          regions: layout.regions.map((r) => ({ rings: r.rings.map(arr), color: r.color })),
+          regions: layout.regions.map((r) => ({ rings: r.rings.map(arr), color: r.color,
+            // Spread, not assigned: JSON.stringify drops undefined keys, so a
+            // non-bold layout must not emit the key at all.
+            ...(r.dilate ? { dilate: r.dilate } : {}) })),
         };
       } else {
         const layout = traceText(font, asset.text, opts);
@@ -148,7 +137,10 @@ export async function prepareProject(project, projectPath, sidecar) {
           inkBbox: arr(layout.inkBbox),
           width: layout.width,
           height: layout.height,
-          regions: layout.regions.map((r) => ({ rings: r.rings.map(arr), color: r.color })),
+          regions: layout.regions.map((r) => ({ rings: r.rings.map(arr), color: r.color,
+            // Spread, not assigned: JSON.stringify drops undefined keys, so a
+            // non-bold layout must not emit the key at all.
+            ...(r.dilate ? { dilate: r.dilate } : {}) })),
           guides: layout.guides.map((g) => ({ pts: arr(g.pts), glyph: g.glyph,
             lift: g.lift, width: g.width })),
         };

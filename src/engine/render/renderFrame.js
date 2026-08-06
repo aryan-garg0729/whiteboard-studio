@@ -214,7 +214,8 @@ export function renderPage(session, project, pageId, t, ctx, opts) {
     // would draw the revealed artwork over itself at `globalAlpha = settle`,
     // and source-over of an image onto itself raises every partial alpha, so
     // antialiased edges and soft greys thicken over the settle window.
-    const out = sf.composite(anim.settles === false ? 0 : settleAt(clip, t));
+    const out = sf.composite(anim.settles === false ? 0 : settleAt(clip, t),
+      plan?.clearInkUnderFill === true);
 
     // world -> screen
     const tr = clip.transform || { x: 0, y: 0, scale: 1, rotation: 0 };

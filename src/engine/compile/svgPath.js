@@ -76,6 +76,85 @@ export function flattenPath(d, opts = {}) {
   return subpaths;
 }
 
+/**
+ * Flatten opentype.js path commands directly, without an SVG string in between.
+ *
+ * Glyph outlines must not go through `path.toPathData()`. opentype.js 2.0.0
+ * rounds coordinates with
+ *
+ *     +(Math.round(decimalPart + 'e+' + places) + 'e-' + places)
+ *
+ * which is string concatenation: a fractional part small enough for JS to
+ * stringify in exponential notation ("2.84e-14") builds "2.84e-14e+3" and the
+ * whole coordinate serialises as the literal `NaN`. The command objects
+ * themselves are perfectly fine -- it is only the serialiser -- and the result
+ * is that a glyph whose outline happens to land within ~1e-7 of an integer
+ * loses a contour and disappears from the finished frame. Playfair Display's
+ * `d` at 64px does exactly this, and the failure is silent and
+ * position-dependent, which is what made it look like a rendering glitch.
+ *
+ * opentype.js 2.0.0 is the current release, so there is nothing to upgrade to.
+ * Reading the commands is also simply less work than printing and reparsing
+ * them.
+ *
+ * @param {Array<{type:string,x?:number,y?:number,x1?:number,y1?:number,
+ *                x2?:number,y2?:number}>} commands
+ * @param {{eps?:number}} [opts]
+ * @returns {Array<{pts:Float64Array, closed:boolean}>}
+ */
+export function flattenCommands(commands, opts = {}) {
+  const eps = opts.eps ?? 0.2;
+  const subpaths = [];
+  let cur = null;
+  let cx = 0, cy = 0;
+  let sx = 0, sy = 0;
+
+  const flush = (closed) => {
+    if (cur && cur.length >= 4) subpaths.push({ pts: Float64Array.from(cur), closed });
+    cur = null;
+  };
+
+  for (const cmd of commands) {
+    switch (cmd.type) {
+      case 'M':
+        flush(false);
+        cx = sx = cmd.x; cy = sy = cmd.y;
+        cur = [cx, cy];
+        break;
+      case 'L':
+        if (!cur) cur = [cx, cy];
+        cx = cmd.x; cy = cmd.y;
+        cur.push(cx, cy);
+        break;
+      case 'C':
+        if (!cur) cur = [cx, cy];
+        flattenCubic(cur, cx, cy, cmd.x1, cmd.y1, cmd.x2, cmd.y2, cmd.x, cmd.y, eps);
+        cx = cmd.x; cy = cmd.y;
+        break;
+      case 'Q':
+        if (!cur) cur = [cx, cy];
+        // Quadratic raised to a cubic, the same conversion flattenPath does.
+        flattenCubic(cur, cx, cy,
+          cx + (2 / 3) * (cmd.x1 - cx), cy + (2 / 3) * (cmd.y1 - cy),
+          cmd.x + (2 / 3) * (cmd.x1 - cmd.x), cmd.y + (2 / 3) * (cmd.y1 - cmd.y),
+          cmd.x, cmd.y, eps);
+        cx = cmd.x; cy = cmd.y;
+        break;
+      case 'Z':
+        if (cur) {
+          if (Math.hypot(cx - sx, cy - sy) > 1e-9) cur.push(sx, sy);
+          flush(true);
+        }
+        cx = sx; cy = sy;
+        break;
+      default:
+        break;
+    }
+  }
+  flush(false);
+  return subpaths;
+}
+
 /** Rough polygon area via the shoelace formula; sign gives winding direction. */
 export function signedArea(pts) {
   let a = 0;

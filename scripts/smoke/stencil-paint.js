@@ -1,15 +1,15 @@
 /**
- * WB_SMOKE_SCRIPT: an image clip can be switched to the reveal, in the app.
+ * WB_SMOKE_SCRIPT: an image clip draws in the app, through the retired-id alias.
  *
- * The engine tests pin what the reveal draws; this pins that the editor can
- * actually reach it -- the animation has to be registered, offered for an image
- * asset, and survive the rebuild that a structural edit triggers. The demo
- * project is deliberately still authored against `draw.outlineFill`, so this
- * also covers the legacy id continuing to load.
+ * The engine tests pin what `draw.stencilPaint` draws; this pins that the editor
+ * can reach it -- registered, offered for an image asset, and surviving the
+ * rebuild a structural edit triggers. The demo project is deliberately still
+ * authored against `draw.imageReveal`, so loading it at all also covers the
+ * retired id being migrated rather than rejected.
  *
- *   WB_SMOKE=/tmp/reveal.png \
+ *   WB_SMOKE=/tmp/paint.png \
  *   WB_SMOKE_PROJECT=demo.project.json \
- *   WB_SMOKE_SCRIPT=scripts/smoke/image-reveal.js \
+ *   WB_SMOKE_SCRIPT=scripts/smoke/stencil-paint.js \
  *   xvfb-run -a npx electron .
  */
 
@@ -33,21 +33,25 @@ await sleep(80);
 const select = document.querySelector('.insp select');
 if (!select) fail('no animation picker for the selected clip');
 const ids = [...select.options].map((o) => o.value);
-if (!ids.includes('draw.imageReveal')) {
-  fail(`the reveal is not offered for an image: ${ids.join(', ')}`);
+if (!ids.includes('draw.stencilPaint') || !ids.includes('draw.inkPaint')) {
+  fail(`both picture animations must be offered for an image: ${ids.join(', ')}`);
 }
-if (select.value !== 'draw.outlineFill') {
-  fail(`expected the demo project's own animation, got ${select.value}`);
+// The document says `draw.imageReveal`; normalizeProject migrates it on load.
+if (select.value !== 'draw.stencilPaint') {
+  fail(`the retired id was not migrated on load, got ${select.value}`);
 }
 
-// Switching is a structural edit: the clip is recompiled and re-traced.
-select.value = 'draw.imageReveal';
+// Switching to an entrance and back is a structural edit: the clip is recompiled
+// both times, which is what this is really exercising.
+select.value = 'appear.fade';
+select.dispatchEvent(new Event('change', { bubbles: true }));
+await sleep(200);
+select.value = 'draw.stencilPaint';
 select.dispatchEvent(new Event('change', { bubbles: true }));
 await sleep(300);
 if (state().clips.find((c) => c.id === imageClip.id) === undefined) fail('the clip vanished');
 
-// The rebuild runs through the sidecar, so give it room, then check the stage
-// actually painted something rather than blanking.
+// Give the rebuild room, then check the stage actually painted something.
 for (let i = 0; i < 100; i++) {
   if (!document.querySelector('.stage .busy, .overlay.busy')) break;
   await sleep(100);
@@ -67,6 +71,6 @@ for (let i = 0; i < d.length; i += 4) {
   if (d[i] < 230 || d[i + 1] < 230 || d[i + 2] < 230) painted++;
   i += 4 * 16;
 }
-if (painted === 0) fail('the stage is blank after switching to the reveal');
+if (painted === 0) fail('the stage is blank after recompiling the clip');
 
-return `switched ${imageClip.id} to draw.imageReveal; ${painted} non-paper samples on the stage`;
+return `${imageClip.id} draws with draw.stencilPaint; ${painted} non-paper samples on the stage`;

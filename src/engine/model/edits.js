@@ -214,7 +214,7 @@ export function addClipTo(doc, asset, { animId, duration = 3, transform, clipId:
     clips: [...doc.clips, {
       id: clipId,
       assetId,
-      animId: animId || (asset.kind === 'text' ? 'draw.handwrite' : 'draw.imageReveal'),
+      animId: animId || (asset.kind === 'text' ? 'draw.handwrite' : 'draw.inkPaint'),
       // Whichever page is showing then -- not page 1. A clip born on a hidden
       // page is rejected outright by the validator.
       pageId: pageAt(doc, start),

@@ -14,11 +14,12 @@ import { createHash } from 'node:crypto';
 import { createCanvas } from '@napi-rs/canvas';
 
 import { setSurfaceFactory } from '../src/engine/render/surfaces.js';
-import { cameraAt, createSession, renderFrame } from '../src/engine/render/renderFrame.js';
+import { cameraAt, createSession, ensureSurfaces, renderFrame } from '../src/engine/render/renderFrame.js';
 import { normalizeProject, projectDuration } from '../src/engine/model/project.js';
 import { withCameraAt, CAMERA_MOVE_SECONDS } from '../src/ui/state/editor.js';
 import { flattenPath } from '../src/engine/compile/svgPath.js';
-import outlineFill from '../src/engine/anim/outlineFill.js';
+import stencilPaint from '../src/engine/anim/stencilPaint.js';
+import { installArt, twoToneImage } from './helpers/art.js';
 
 setSurfaceFactory((w, h) => {
   const canvas = createCanvas(w, h);
@@ -221,14 +222,21 @@ const moving = {
     ],
   }],
   clips: [{
-    id: 'c', assetId: 'shape', animId: 'draw.outlineFill', start: 0, duration: 1,
+    id: 'c', assetId: 'shape', animId: 'draw.stencilPaint', start: 0, duration: 1,
     transform: { x: 0, y: 0, scale: 1, rotation: 0 },
   }],
 };
 
+const ART = twoToneImage();
+
 async function freshSession() {
   const s = createSession();
-  s.plans.set('c', await outlineFill.compile(asset, { brushWidth: 3, fillBrushWidth: 12 }));
+  s.plans.set('c', await stencilPaint.compile({ id: 'shape', image: ART },
+    { fillBrushWidth: 12 }));
+  // The reveal shows the artwork through a mask, so without this the clip
+  // renders as nothing and every pixel assertion below passes vacuously.
+  ensureSurfaces(s, moving);
+  installArt(s, 'c', ART);
   return s;
 }
 

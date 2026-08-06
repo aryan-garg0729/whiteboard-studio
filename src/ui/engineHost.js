@@ -12,11 +12,11 @@ import { makeStroke } from '../engine/compile/geometry.js';
 import { compileErase } from '../engine/anim/erase.js';
 import { getAnimation } from '../engine/anim/registry.js';
 import { paintVectorArt } from '../engine/render/vectorArt.js';
-import { knockOutPaper, wantsPaperKnockout } from '../engine/render/artAlpha.js';
+import { imagePixels, vectorPixels } from '../engine/render/rasterize.js';
 // Imported for their registration side effect as much as for their exports:
 // `getAnimation` can only hand back what has been registered.
-import outlineFill from '../engine/anim/outlineFill.js';
-import imageReveal from '../engine/anim/imageReveal.js';
+import stencilPaint from '../engine/anim/stencilPaint.js';
+import '../engine/anim/inkPaint.js';
 import appear, { isAppear } from '../engine/anim/appear.js';
 import handwrite from '../engine/anim/handwrite.js';
 import textReveal from '../engine/anim/textReveal.js';
@@ -91,26 +91,36 @@ export async function buildSession(loaded) {
       }));
       plan = await handwrite.compile({ layout: { strokes, bbox: p.bbox } });
     } else {
-      const asset = {
-        id: clip.assetId,
-        bbox: p.bbox,
-        subpaths: p.subpaths.map((s) => ({
-          pts: f64(s.pts), closed: s.closed, width: s.width, color: s.color,
-        })),
-        regions: p.regions.map((r) => ({
-          rings: r.rings.map(f64), color: r.color, bbox: r.bbox,
-        })),
-      };
-      // Dispatch on the clip's own animation rather than assuming outlineFill:
-      // an image can now be revealed under the pen, or simply appear.
-      plan = await getAnimation(clip.animId ?? 'draw.outlineFill').compile(asset, {
-        // Pen widths are chosen so the stroke is a constant width *on screen*.
-        // An entrance has no pen and ignores them.
-        brushWidth: Math.max(1.5, 2.4 / clip.transform.scale),
-        fillBrushWidth: Math.max(8, 15 / clip.transform.scale),
-        ...clip.params,
-      });
-      artJobs.push({ clipId: clip.id, prepared: p });
+      // Both artwork kinds are planned from pixels. A vector is rasterised from
+      // the geometry the main process parsed; a raster is simply decoded. This
+      // is the twin of `buildVectorClip`/`buildImageClip` in `nodeSession.js`,
+      // and the two must keep agreeing or preview and export drift.
+      let vector = null;
+      let decoded = null;
+      let image;
+      if (p.kind === 'vector') {
+        vector = {
+          width: p.width,
+          height: p.height,
+          subpaths: p.subpaths.map((s) => ({
+            pts: f64(s.pts), closed: s.closed, stroke: s.stroke, strokeWidth: s.strokeWidth,
+          })),
+          regions: p.regions.map((r) => ({ rings: r.rings.map(f64), color: r.color })),
+        };
+        image = vectorPixels(vector);
+      } else {
+        decoded = await loadImage(p.art);
+        image = imagePixels(decoded, decoded.width, decoded.height);
+      }
+
+      plan = await getAnimation(clip.animId ?? 'draw.stencilPaint')
+        .compile({ id: clip.assetId, image }, {
+          // Pen widths are chosen so the stroke is a constant width *on screen*.
+          // An entrance has no pen and ignores them.
+          fillBrushWidth: Math.max(8, 15 / clip.transform.scale),
+          ...clip.params,
+        });
+      artJobs.push({ clipId: clip.id, vector, decoded });
     }
 
     session.plans.set(clip.id, plan);
@@ -123,22 +133,23 @@ export async function buildSession(loaded) {
   // its artwork would silently never be installed.
   ensureSurfaces(session, project);
 
-  for (const { clipId, prepared: p } of artJobs) {
+  for (const { clipId, prepared: p, vector, decoded } of artJobs) {
     const sf = session.surfaces.get(clipId);
     if (!sf) continue;
-    const surface = sf.ensureArt();
-    const art = surface.ctx;
-    if (p.art) {
-      art.drawImage(await loadImage(p.art), 0, 0, p.width, p.height);
-      // A drawing arrives as an opaque rectangle of white with some ink on it.
-      // Giving it a real silhouette is what lets the reveal mask be generous
-      // instead of being the only thing standing between the artwork and the
-      // paper -- see render/artAlpha.js.
-      if (wantsPaperKnockout(p.traceMode)) knockOutPaper(surface, sf.w, sf.h);
+    const art = sf.ensureArt().ctx;
+    if (decoded) {
+      // At source resolution and otherwise untouched: the finished frame has to
+      // be this image, so nothing is resampled and no paper is knocked out.
+      art.drawImage(decoded, 0, 0, decoded.width, decoded.height);
+    } else if (vector) {
+      // A vector has no raster of its own, so its fills and strokes *are* the
+      // artwork the pen uncovers.
+      paintVectorArt(art, vector.regions, vector.subpaths);
+    } else if (p) {
+      // Glyph outlines are regions with no separate stroked subpaths. The
+      // 'evenodd' fill paintVectorArt already uses is what keeps counters open.
+      paintVectorArt(art, p.regions, p.subpaths ?? []);
     }
-    // Glyph outlines are regions with no separate stroked subpaths. The
-    // 'evenodd' fill paintVectorArt already uses is what keeps counters open.
-    else paintVectorArt(art, p.regions, p.subpaths ?? []);
   }
 
   // Local-space bounds per clip, so the editor can draw selection boxes and

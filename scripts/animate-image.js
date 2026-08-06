@@ -1,14 +1,20 @@
 /**
- * The real import pipeline, end to end: raster image -> vectorized ->
- * outline-then-scribble animation -> 1080p MP4.
+ * The real import pipeline, end to end: raster image -> paint pass -> 1080p MP4.
  *
  *   node scripts/animate-image.js <image> [--out o.mp4] [--seconds 6]
- *                                 [--mode lineArt|photo] [--colors 8]
+ *                                 [--anim inkPaint|stencilPaint]
+ *                                 [--mode zigzag|colorGroups] [--colors 8]
+ *                                 [--sweep-from topLeft|topRight|bottomLeft|bottomRight]
+ *                                 [--sweep-angle -45]
+ *                                 [--group-order largestFirst|darkFirst|readingOrder]
+ *                                 [--tolerance 14] [--ink-luma 0.25]
+ *                                 [--outline-share 0.45]
  *                                 [--hand hand1|hand2|hand4] [--no-hand]
  *                                 [--frames-only]
  *
- * The scribble mask reveals the ORIGINAL pixels, not flat region colours, so
- * gradients and photographic texture survive the animation.
+ * The mask reveals the ORIGINAL pixels, and every pixel is owned by some group,
+ * so the last frame is the source image exactly -- gradients, texture and all.
+ * No Python, no tracing.
  */
 
 import { createCanvas, loadImage } from '@napi-rs/canvas';
@@ -18,15 +24,15 @@ import { fileURLToPath } from 'node:url';
 
 import { setSurfaceFactory } from '../src/engine/render/surfaces.js';
 import { createSession, renderFrame } from '../src/engine/render/renderFrame.js';
-import { Sidecar, toAsset } from '../src/engine/sidecar/client.js';
 import { exportVideo } from '../src/engine/export/driver.js';
 import { compileErase } from '../src/engine/anim/erase.js';
 import { getAnimation } from '../src/engine/anim/registry.js';
-import { knockOutPaper, wantsPaperKnockout } from '../src/engine/render/artAlpha.js';
+import { imagePixels } from '../src/engine/render/rasterize.js';
 // Imported for their registration side effect; `getAnimation` only knows what
 // has been registered.
-import outlineFill from '../src/engine/anim/outlineFill.js';
-import imageReveal from '../src/engine/anim/imageReveal.js';
+import stencilPaint from '../src/engine/anim/stencilPaint.js';
+import '../src/engine/anim/inkPaint.js';
+import appear from '../src/engine/anim/appear.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -53,37 +59,32 @@ const HAND = arg('--hand', 'hand1');
 const SHOW_HAND = !flag('--no-hand');
 const FRAMES_ONLY = flag('--frames-only');
 const ERASE = Number(arg('--erase', 0)); // seconds of erase after the draw
-// `imageReveal` shows the real artwork under the pen; `outlineFill` draws a
-// pen-ink stand-in and crossfades to it. Both are kept runnable from here
-// because the difference between them is the thing worth looking at.
 // A bare name is one of the pen animations, since that is what this script is
 // mostly for; anything with a dot is passed through as a full id, so
 // `--anim appear.fade` works too.
-const ANIM_ARG = arg('--anim', 'imageReveal');
+const ANIM_ARG = arg('--anim', 'stencilPaint');
 const ANIM = ANIM_ARG.includes('.') ? ANIM_ARG : `draw.${ANIM_ARG}`;
 const OUT = resolve(ROOT, arg('--out', `${basename(IMAGE).replace(/\.[^.]+$/, '')}.mp4`));
 
 async function main() {
-  const sidecar = new Sidecar({ root: ROOT, cacheDir: join(ROOT, '.cache') });
+  const params = {};
+  if (arg('--mode', null)) params.mode = arg('--mode');
+  if (arg('--colors', null)) params.colors = Number(arg('--colors'));
+  if (arg('--sweep-from', null)) params.sweepFrom = arg('--sweep-from');
+  if (arg('--sweep-angle', null)) params.sweepAngle = Number(arg('--sweep-angle'));
+  if (arg('--group-order', null)) params.groupOrder = arg('--group-order');
+  // draw.inkPaint's own two.
+  if (arg('--tolerance', null)) params.colorTolerance = Number(arg('--tolerance'));
+  if (arg('--ink-luma', null)) params.inkLuma = Number(arg('--ink-luma'));
+  if (arg('--outline-share', null)) params.outlineShare = Number(arg('--outline-share'));
 
-  const opts = {};
-  if (arg('--mode', null)) opts.mode = arg('--mode');
-  if (arg('--colors', null)) opts.colors = Number(arg('--colors'));
+  console.log(`reading ${IMAGE} ...`);
+  const src = await loadImage(resolve(IMAGE));
+  const asset = { id: 'img', image: imagePixels(src, src.width, src.height) };
 
-  console.log(`tracing ${IMAGE} ...`);
-  const t0 = Date.now();
-  const traced = await sidecar.vectorize(resolve(IMAGE), opts);
-  console.log(`  mode=${traced.mode} (detected ${traced.detectedMode})`
-            + `  regions=${traced.regions.length}  contours=${traced.subpaths.length}`
-            + `  ${((Date.now() - t0) / 1000).toFixed(1)}s`);
-  console.log(`  stats=${JSON.stringify(traced.stats)}`);
-  sidecar.stop();
-
-  const asset = toAsset('img', traced);
-
-  // Fit the traced artwork into the frame with a margin.
-  const aw = traced.width;
-  const ah = traced.height;
+  // Fit the artwork into the frame with a margin.
+  const aw = src.width;
+  const ah = src.height;
   const fit = Math.min((WIDTH * 0.72) / aw, (HEIGHT * 0.78) / ah);
 
   const project = {
@@ -106,30 +107,27 @@ async function main() {
     resolveImage: (src) => images.get(src.file),
   });
 
-  const strokeW = Math.max(1.5, 2.6 / fit);
+  const t0 = Date.now();
   const plan = await getAnimation(ANIM).compile(asset, {
-    brushWidth: strokeW,
     fillBrushWidth: Math.max(8, 16 / fit),
+    ...params,
   });
   session.plans.set('c1', plan);
   if (ERASE) session.erasePlans.set('c1', compileErase(plan, { id: 'c1' }));
   console.log(plan.strokes.length
     ? `plan: ${plan.phases.outline.i1} outline strokes, `
-      + `${plan.strokes.length - plan.phases.outline.i1} fill strokes`
+      + `${plan.strokes.length - plan.phases.outline.i1} paint strokes `
+      + `(${((Date.now() - t0) / 1000).toFixed(1)}s)`
     : `plan: ${ANIM}, nothing to draw -- the artwork simply arrives`);
 
   const canvas = createCanvas(WIDTH, HEIGHT);
   const ctx = canvas.getContext('2d');
 
-  // Warm up so surfaces exist, then paint the SOURCE IMAGE as the artwork the
-  // scribble reveals -- this is what preserves real gradients and texture.
+  // Warm up so surfaces exist, then install the SOURCE IMAGE as the artwork the
+  // paint pass reveals, at its own resolution and otherwise untouched.
   renderFrame(session, project, 0, ctx, { width: WIDTH, height: HEIGHT, showHand: false });
   const sf = session.surfaces.get('c1');
-  const src = await loadImage(resolve(IMAGE));
-  const surface = sf.ensureArt();
-  surface.ctx.drawImage(src, 0, 0, aw, ah);
-  // Line art is ink on paper, and the paper is not part of the drawing.
-  if (wantsPaperKnockout(traced.mode)) knockOutPaper(surface, sf.w, sf.h);
+  sf.ensureArt().ctx.drawImage(src, 0, 0, aw, ah);
   sf.resetAll();
 
   const frames = Math.round((SECONDS + (ERASE ? ERASE + 0.6 : 0)) * FPS);

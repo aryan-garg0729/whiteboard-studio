@@ -63,31 +63,34 @@ test('a project name that could escape is refused', () => {
 test('an animation must suit the asset kind it is asked to draw', () => {
   assert.throws(() => checkAnimForKind('draw.handwrite', 'image'),
     /does not suit a image asset/);
-  assert.throws(() => checkAnimForKind('draw.imageReveal', 'text'),
+  assert.throws(() => checkAnimForKind('draw.stencilPaint', 'text'),
     /does not suit a text asset/);
   checkAnimForKind('draw.handwrite', 'text');
   checkAnimForKind('appear.fade', 'vector');
 });
 
 test('unknown params are rejected rather than silently dropped', () => {
-  assert.throws(() => checkParams('draw.imageReveal', { brushwidth: 3 }),
-    /has no parameter "brushwidth"/);
+  assert.throws(() => checkParams('draw.stencilPaint', { fillbrushwidth: 3 }),
+    /has no parameter "fillbrushwidth"/);
   assert.throws(() => checkParams('draw.handwrite', { anything: 1 }),
     /takes no parameters/);
+  // The pencil stencil is gone, and so are the parameters that described it.
+  assert.throws(() => checkParams('draw.stencilPaint', { pencilWidth: 3 }),
+    /has no parameter "pencilWidth"/);
 });
 
 test('out-of-range params are clamped, and the clamp is reported', () => {
-  const r = checkParams('draw.imageReveal', { brushWidth: 999 });
-  assert.equal(r.params.brushWidth, 24);
-  assert.match(r.notes[0], /brushWidth clamped from 999 to 24/);
+  const r = checkParams('draw.stencilPaint', { fillBrushWidth: 999 });
+  assert.equal(r.params.fillBrushWidth, 64);
+  assert.match(r.notes[0], /fillBrushWidth clamped from 999 to 64/);
 });
 
 test('params of the wrong type are refused', () => {
-  assert.throws(() => checkParams('draw.imageReveal', { brushWidth: 'thick' }),
+  assert.throws(() => checkParams('draw.stencilPaint', { fillBrushWidth: 'thick' }),
     /must be a finite number/);
-  assert.throws(() => checkParams('draw.imageReveal', { orderStyle: 'sideways' }),
+  assert.throws(() => checkParams('draw.stencilPaint', { mode: 'sideways' }),
     /must be one of/);
-  assert.throws(() => checkParams('draw.imageReveal', []), /must be an object/);
+  assert.throws(() => checkParams('draw.stencilPaint', []), /must be an object/);
 });
 
 test('a transform must be finite numbers, because the schema does not check', () => {
@@ -105,6 +108,8 @@ test('an unknown hand style is refused', () => {
 
 test('every registered animation is catalogued with the kinds it suits', () => {
   const all = animations();
+  // stencilPaint replaced imageReveal and outlineFill; inkPaint was then added
+  // beside it as the specialist for outlined, flat-filled artwork.
   assert.equal(all.length, 8);
   for (const a of all) {
     assert.ok(a.kinds.length, `${a.id} suits no asset kind`);

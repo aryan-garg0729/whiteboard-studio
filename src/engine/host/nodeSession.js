@@ -14,13 +14,12 @@
  * There is a sibling in `src/ui/engineHost.js` with the same name and the same
  * return shape. The two cannot be merged: that one rebuilds from the prepared
  * IPC payload (geometry already traced in the main process, images as data
- * URLs) and paints into `OffscreenCanvas`, while this one reads files and
- * drives the sidecar itself. Keeping the shapes identical is what lets callers
- * treat them interchangeably.
+ * URLs) and paints into `OffscreenCanvas`, while this one reads and decodes the
+ * files itself. Keeping the shapes identical is what lets callers treat them
+ * interchangeably.
  */
 
 import { createCanvas, loadImage } from '@napi-rs/canvas';
-import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import opentype from 'opentype.js';
@@ -31,18 +30,17 @@ import { isAppear } from '../anim/appear.js';
 import { parseSvg } from '../compile/svgDoc.js';
 import { outlineText, traceText } from '../compile/text.js';
 import { styleIdsFor } from '../hand/styles.js';
-import { normalizeProject, projectFrames } from '../model/project.js';
-import { knockOutPaper, wantsPaperKnockout } from '../render/artAlpha.js';
+import { migrateAnimation, normalizeProject, projectFrames } from '../model/project.js';
 import { createSession, ensureSurfaces } from '../render/renderFrame.js';
+import { imagePixels, vectorPixels } from '../render/rasterize.js';
 import { setSurfaceFactory } from '../render/surfaces.js';
 import { paintVectorArt } from '../render/vectorArt.js';
-import { toAsset } from '../sidecar/client.js';
 
 // Imported for their registration side effect; `getAnimation` only knows what
 // has been registered, and `listAnimations()` only lists it. Dropping any of
 // these turns every clip using it into "unknown animation type" at compile.
-import '../anim/outlineFill.js';
-import '../anim/imageReveal.js';
+import '../anim/stencilPaint.js';
+import '../anim/inkPaint.js';
 import '../anim/appear.js';
 import '../anim/handwrite.js';
 import textReveal from '../anim/textReveal.js';
@@ -69,50 +67,46 @@ export function installNodeSurfaces() {
  * the clip's own `animId` exactly as it is in the app -- the pre-reveal default
  * is kept for documents written before there was a choice.
  */
-const drawableAnim = (clip) => getAnimation(clip.animId ?? 'draw.outlineFill');
+const drawableAnim = (clip) =>
+  getAnimation(migrateAnimation(clip.animId ?? 'draw.stencilPaint').animId);
 
 /** Brush widths are authored in screen terms, so they divide out the scale. */
 const brushOpts = (clip) => ({
-  brushWidth: Math.max(1.5, 2.4 / clip.transform.scale),
   fillBrushWidth: Math.max(8, 15 / clip.transform.scale),
   ...clip.params,
 });
 
 /**
- * Content-addressed cache key for a trace.
+ * A vector is rasterised and then analysed exactly like a raster.
  *
- * The sidecar has had an atomic disk cache behind `vectorize` all along
- * (`src/sidecar/server.py`), but it no-ops without a key and no caller passed
- * one -- so every rebuild re-traced every image, seconds at a time. Hashing the
- * file bytes rather than its path means an edited image invalidates itself and
- * two copies of the same picture share one entry.
- */
-export function traceKey(bytes, opts) {
-  return createHash('sha256')
-    .update(bytes)
-    .update(JSON.stringify(opts || {}))
-    .digest('hex')
-    .slice(0, 16);
-}
-
-/**
- * Vectors skip the sidecar: the geometry is already exact, so tracing it would
- * only throw information away.
+ * Its own geometry is still what gets *painted* -- `vector` here is what
+ * `paintVectorArt` installs as the artwork -- but what the pen is planned
+ * against is pixels, so an SVG and a PNG draw the same way. See
+ * `render/rasterize.js` for why that raster is at one pixel per user unit.
  */
 async function buildVectorClip(clip, asset, { rel }) {
   const parsed = parseSvg(readFileSync(rel(asset.src), 'utf8'), { eps: 0.2 });
   if (!parsed.subpaths.length) throw new Error(`${asset.src}: no drawable geometry`);
-  const plan = await drawableAnim(clip).compile(toAsset(clip.assetId, parsed), brushOpts(clip));
-  return { plan, traced: parsed, vector: parsed };
+  const image = vectorPixels(parsed);
+  const plan = await drawableAnim(clip)
+    .compile({ id: clip.assetId, image }, brushOpts(clip));
+  return { plan, vector: parsed };
 }
 
-async function buildImageClip(clip, asset, { rel, sidecar }) {
+async function buildImageClip(clip, asset, { rel }) {
   const path = rel(asset.src);
-  if (!sidecar) throw new Error(`${asset.src}: tracing an image needs the Python sidecar`);
-  const opts = asset.trace || {};
-  const traced = await sidecar.vectorize(path, opts, traceKey(readFileSync(path), opts));
-  const plan = await drawableAnim(clip).compile(toAsset(clip.assetId, traced), brushOpts(clip));
-  return { plan, traced, artSrc: path };
+  let decoded;
+  try {
+    decoded = await loadImage(path);
+  } catch (err) {
+    // The decoder's own message is "Invalid URL", which names neither the file
+    // nor the project it came from.
+    throw new Error(`${asset.src}: could not be read (${err.message})`);
+  }
+  const image = imagePixels(decoded, decoded.width, decoded.height);
+  const plan = await drawableAnim(clip)
+    .compile({ id: clip.assetId, image }, brushOpts(clip));
+  return { plan, artSrc: path, artWidth: decoded.width, artHeight: decoded.height };
 }
 
 async function buildTextClip(clip, asset, { rel, root }) {
@@ -125,6 +119,7 @@ async function buildTextClip(clip, asset, { rel, root }) {
     fontSize: asset.fontSize ?? 120,
     penWidth: asset.penWidth ?? Math.max(2, (asset.fontSize ?? 120) * 0.045),
     color: asset.color,
+    bold: !!asset.bold,
   };
 
   // Same branch as electron/prepare.js: both drawing modes retain real glyph
@@ -163,14 +158,12 @@ export async function compileClip(clip, asset, ctx) {
  *   either a raw file or an already-normalised document
  * @param {Object} o
  * @param {string} o.root repo root, for bundled fonts and hand manifests
- * @param {import('../sidecar/client.js').Sidecar|null} o.sidecar may be null
- *   when no clip needs tracing -- vector and text compile without Python
  * @param {(p: string) => string} [o.rel] resolve an asset path; defaults to
  *   identity, which is right for the absolute paths a host stores
  * @param {(clipId: string) => void} [o.onClip] progress, per compiled clip
  * @returns {Promise<{session, project, frames, bboxes, handStyleId, styles}>}
  */
-export async function buildNodeSession(raw, { root, sidecar, rel = (p) => p, onClip } = {}) {
+export async function buildNodeSession(raw, { root, rel = (p) => p, onClip } = {}) {
   const project = normalizeProject(raw);
 
   // The chosen hand plus every tool style: renderFrame resolves the erase
@@ -195,11 +188,12 @@ export async function buildNodeSession(raw, { root, sidecar, rel = (p) => p, onC
   for (const clip of project.clips) {
     const asset = project.assets[clip.assetId];
     onClip?.(clip.id, asset);
-    const built = await compileClip(clip, asset, { root, sidecar, rel });
+    const built = await compileClip(clip, asset, { root, rel });
 
     session.plans.set(clip.id, built.plan);
     if (clip.erase) session.erasePlans.set(clip.id, compileErase(built.plan, { id: clip.id }));
-    if (built.artSrc) artwork.push({ clipId: clip.id, src: built.artSrc, traced: built.traced });
+    if (built.artSrc) artwork.push({ clipId: clip.id, src: built.artSrc,
+      artWidth: built.artWidth, artHeight: built.artHeight });
     if (built.vector) artwork.push({ clipId: clip.id, vector: built.vector });
   }
 
@@ -207,19 +201,18 @@ export async function buildNodeSession(raw, { root, sidecar, rel = (p) => p, onC
   // directly rather than conjured by rendering a warm-up frame: a clip on a page
   // that frame does not show would get no surfaces and no artwork.
   ensureSurfaces(session, project);
-  for (const { clipId, src, traced, vector } of artwork) {
+  for (const { clipId, src, vector, artWidth, artHeight } of artwork) {
     const sf = session.surfaces.get(clipId);
     if (!sf) continue;
     const surface = sf.ensureArt();
     if (vector) {
       // No raster to reveal, so the vector's own fills and strokes are both
-      // the reveal artwork and what the clip settles to.
+      // the reveal artwork and what the pen uncovers.
       paintVectorArt(surface.ctx, vector.regions, vector.subpaths);
     } else {
-      surface.ctx.drawImage(await loadImage(src), 0, 0, traced.width, traced.height);
-      // The paper is knocked out of line art so the artwork carries its own
-      // silhouette; see render/artAlpha.js.
-      if (wantsPaperKnockout(traced.mode)) knockOutPaper(surface, sf.w, sf.h);
+      // At source resolution and otherwise untouched. Nothing is resampled and
+      // no paper is knocked out: the finished frame has to be this image.
+      surface.ctx.drawImage(await loadImage(src), 0, 0, artWidth, artHeight);
     }
   }
 

@@ -48,6 +48,7 @@ const SHOW_HAND = !flag('--no-hand');
 const FRAMES_ONLY = flag('--frames-only');
 const ERASE = Number(arg('--erase', 0));
 const REVEAL = flag('--reveal');
+const BOLD = flag('--bold');
 
 const WIDTH = 1920;
 const HEIGHT = 1080;
@@ -66,13 +67,13 @@ async function main() {
   if (REVEAL) {
     // No sidecar at all: the reveal keeps the filled outline, so there is no
     // centreline to compute.
-    layout = outlineText(font, TEXT, { fontSize: SIZE, penWidth: Math.max(2, SIZE * 0.05) });
+    layout = outlineText(font, TEXT, { fontSize: SIZE, penWidth: Math.max(2, SIZE * 0.05), bold: BOLD });
     const spans = layout.lines.reduce((n, l) => n + l.spans.length, 0);
     console.log(`  ${layout.regions.length} glyphs, ${spans} word span(s) in `
               + `${((Date.now() - t0) / 1000).toFixed(2)}s (no sidecar)`);
     if (!layout.regions.length) throw new Error('no glyph outlines produced');
   } else {
-    layout = traceText(font, TEXT, { fontSize: SIZE, penWidth: Math.max(2, SIZE * 0.05) });
+    layout = traceText(font, TEXT, { fontSize: SIZE, penWidth: Math.max(2, SIZE * 0.05), bold: BOLD });
     const drawn = layout.guides.filter((s) => !s.lift).length;
     console.log(`  ${layout.guides.length} guide strokes (${drawn} drawn) in `
               + `${((Date.now() - t0) / 1000).toFixed(1)}s`);

@@ -19,7 +19,7 @@
 import { makePhase } from '../compile/geometry.js';
 import { hashSeed } from '../compile/scribble.js';
 import { register } from './registry.js';
-import { easeEnds } from './outlineFill.js';
+import { easeEnds } from './penStrokes.js';
 
 /**
  * Horizontal travel per loop of the hand, as a fraction of the band height.

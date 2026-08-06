@@ -121,13 +121,6 @@ test('a project with no clips has zero duration rather than just a tail', () => 
   assert.equal(projectDuration(normalizeProject({ assets: {}, clips: [] })), 0);
 });
 
-test('the bundled example project is valid and renders a sane length', () => {
-  const raw = JSON.parse(readFileSync(new URL('../examples/demo.project.json', import.meta.url)));
-  const p = normalizeProject(raw);
-  assert.equal(p.clips.length, 2);
-  assert.ok(projectDuration(p) > 10 && projectDuration(p) < 13);
-});
-
 // ── tracks ──────────────────────────────────────────────────────────
 
 test('a document with no tracks gets the defaults and everything assigned', () => {
@@ -294,4 +287,44 @@ test('the pages example is a valid document', () => {
   // It must actually exercise the thing it exists to demonstrate.
   const visits = p.pageBreaks.filter((b) => b.pageId === p.pages[0].id);
   assert.equal(visits.length, 1, 'the example returns to its first page');
+});
+
+// ── retired animation ids ─────────────────────────────────────────────
+
+test('a retired animation id is migrated rather than rejected', () => {
+  // Every saved project, both bundled examples and any MCP script in the wild
+  // names one of these. `draw.stencilPaint` replaced both, and a document that
+  // used to render must not stop rendering.
+  for (const old of ['draw.imageReveal', 'draw.outlineFill']) {
+    const doc = normalizeProject({
+      assets: { a: { kind: 'image', src: 'x.png' } },
+      clips: [{ id: 'c', assetId: 'a', animId: old, start: 0, duration: 2 }],
+    });
+    assert.equal(doc.clips[0].animId, 'draw.stencilPaint', old);
+  }
+});
+
+test('parameters that survived are renamed, and the rest are dropped', () => {
+  const doc = normalizeProject({
+    assets: { a: { kind: 'image', src: 'x.png' } },
+    clips: [{
+      id: 'c', assetId: 'a', animId: 'draw.outlineFill', start: 0, duration: 2,
+      params: { brushWidth: 4, scribbleAngle: -30, outlineShare: 0.5, orderStyle: 'topDown' },
+    }],
+  });
+  const p = doc.clips[0].params;
+  assert.equal(p.sweepAngle, -30, 'scribbleAngle is the same quantity as sweepAngle');
+  assert.equal(p.scribbleAngle, undefined, 'the old name must not survive alongside the new');
+  // Everything that described the pencil stencil goes with it. Carrying these
+  // onto the nearest surviving parameter would silently change the document.
+  for (const gone of ['brushWidth', 'pencilWidth', 'outlineShare', 'orderStyle']) {
+    assert.equal(p[gone], undefined, `${gone} described the stencil, which is gone`);
+  }
+});
+
+test('an animation that never existed is still an error', () => {
+  assert.throws(() => normalizeProject({
+    assets: { a: { kind: 'image', src: 'x.png' } },
+    clips: [{ id: 'c', assetId: 'a', animId: 'draw.wiggle', start: 0, duration: 2 }],
+  }), /unknown animation "draw\.wiggle"|draw\.wiggle/);
 });

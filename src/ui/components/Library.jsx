@@ -111,10 +111,19 @@ function TextTab({ fonts, draft, setDraft, onAdd }) {
                onChange={(penWidth) => setDraft({ ...draft, penWidth })} />
         </Field>
       </div>
-      <Field label="Ink">
-        <input type="color" value={draft.color}
-               onChange={(e) => setDraft({ ...draft, color: e.target.value })} />
-      </Field>
+      <div className="pair">
+        <Field label="Ink">
+          <input type="color" value={draft.color}
+                 onChange={(e) => setDraft({ ...draft, color: e.target.value })} />
+        </Field>
+        <Field label="Weight">
+          <label className="check">
+            <input type="checkbox" checked={!!draft.bold}
+                   onChange={(e) => setDraft({ ...draft, bold: e.target.checked })} />
+            Bold
+          </label>
+        </Field>
+      </div>
 
       <button className="btn primary wide" disabled={!draft.text.trim()} onClick={onAdd}>
         <Icon d={PATH.plus} /> Add text clip

@@ -12,8 +12,139 @@
  */
 
 import { makeStroke } from './geometry.js';
-import { flattenPath } from './svgPath.js';
+import { flattenCommands } from './svgPath.js';
 import { guideForCharacter } from './textGuides.js';
+
+/** Weight asked of a variable face for bold, and for regular. */
+const BOLD_WGHT = 700;
+const REGULAR_WGHT = 400;
+
+/**
+ * Synthetic emboldening width, as a fraction of the font size.
+ *
+ * Only reached on a face with no `wght` axis. Stroking a glyph's own outline at
+ * this width thickens the stems and shrinks the counters by the same amount,
+ * which is what "fake bold" is; five of the nine bundled faces have no axis and
+ * this is the only way they get a bold at all.
+ */
+export const SYNTHETIC_BOLD_FRAC = 0.055;
+
+/** The face's `wght` variation axis, or null if it is a single-weight font. */
+export function weightAxis(font) {
+  const axes = font?.tables?.fvar?.axes;
+  return (axes && axes.find((a) => a.tag === 'wght')) || null;
+}
+
+/** Letters the weight-axis soundness check is run on. */
+const PROBE_CHARS = 'oeacn';
+
+/**
+ * Least the ink of a probe glyph must grow between regular and bold for the
+ * face's interpolation to be believed. Sound faces clear this by a wide margin
+ * (1.3x and up); the failure this exists to catch comes in at 0.91.
+ */
+const BOLD_AREA_GAIN = 1.05;
+
+const ringArea2 = (pts) => {
+  let a = 0;
+  for (let i = 0; i < pts.length; i += 2) {
+    const j = (i + 2) % pts.length;
+    a += pts[i] * pts[j + 1] - pts[j] * pts[i + 1];
+  }
+  return a / 2;
+};
+
+/**
+ * How much ink a glyph lays down, under the even-odd rule the artwork is filled
+ * with: the largest contour is the letter, everything inside it is a counter.
+ */
+function glyphInk(font, ch) {
+  const path = font.charToGlyph(ch).getPath(0, 0, 100, {}, font);
+  const areas = flattenCommands(path.commands, { eps: 0.25 })
+    .map((s) => Math.abs(ringArea2(s.pts)))
+    .sort((a, b) => b - a);
+  if (!areas.length) return 0;
+  return areas[0] - areas.slice(1).reduce((s, v) => s + v, 0);
+}
+
+/**
+ * Whether this face's `wght` axis can actually be trusted to produce a bold.
+ *
+ * It usually can, and where it can a real bold beats a stroked-on one. But
+ * opentype.js 2.0.0 mis-interpolates the odd glyph -- Montserrat's `o` comes out
+ * with its counter almost as large as the letter, so a bold caption renders a
+ * thin, notched ring where an `o` should be, and `o` is not a letter anyone can
+ * avoid. There is no newer release to upgrade to.
+ *
+ * So the face is probed instead of trusted: a handful of round letters are
+ * flattened at both weights, and if any of them fails to gain ink the whole face
+ * drops to synthetic bold. Per face and not per glyph deliberately -- mixing the
+ * two inside one word is more obviously wrong than a uniformly blunter bold.
+ *
+ * Pure geometry, so it runs anywhere the engine does: no canvas, no rasterising,
+ * and the same answer in the app, the CLI and the tests.
+ */
+export function hasSoundWeightAxis(font) {
+  const axis = weightAxis(font);
+  if (!axis) return false;
+  const lo = Math.max(axis.minValue, Math.min(axis.maxValue, REGULAR_WGHT));
+  const hi = Math.max(axis.minValue, Math.min(axis.maxValue, BOLD_WGHT));
+  if (!(hi > lo)) return false;
+
+  const before = font.variation.get();
+  try {
+    for (const ch of PROBE_CHARS) {
+      font.variation.set({ wght: lo });
+      const light = glyphInk(font, ch);
+      font.variation.set({ wght: hi });
+      const heavy = glyphInk(font, ch);
+      if (light <= 0) continue;                    // no contours to judge
+      if (heavy / light < BOLD_AREA_GAIN) return false;
+    }
+    return true;
+  } finally {
+    font.variation.set(before);
+  }
+}
+
+/**
+ * `hasSoundWeightAxis` memoised on the font instance.
+ *
+ * The probe flattens ten glyph outlines, which is cheap but not free, and every
+ * layout would otherwise repeat it. Hung off the font object so it lives exactly
+ * as long as the parsed face does.
+ */
+export function boldModeFor(font) {
+  if (font.__wbBoldMode === undefined) {
+    font.__wbBoldMode = hasSoundWeightAxis(font) ? 'variable' : 'synthetic';
+  }
+  return font.__wbBoldMode;
+}
+
+/**
+ * Put the font instance at the requested weight, and say how bold has to be
+ * faked for the part the font cannot do itself.
+ *
+ * Called for *every* layout, not only bold ones, and that is deliberate:
+ * Montserrat's `wght` axis defaults to 100, so a face left at its default
+ * instance rendered as Thin. Pinning regular to 400 fixes that.
+ *
+ * @returns {{variable:boolean, dilate:number}} `dilate` is 0 whenever the font
+ *   carries a real weight axis -- there is nothing left to fake.
+ */
+export function applyWeight(font, bold, fontSize = 0) {
+  const axis = weightAxis(font);
+  // A face whose axis is present but unsound still gets pinned to regular --
+  // that half works, and it is what stops Montserrat rendering every caption in
+  // Thin. Only the *bold* half falls back to a stroked outline.
+  if (axis) {
+    const sound = boldModeFor(font) === 'variable';
+    const want = bold && sound ? BOLD_WGHT : REGULAR_WGHT;
+    font.variation.set({ wght: Math.min(axis.maxValue, Math.max(axis.minValue, want)) });
+    if (sound) return { variable: true, dilate: 0 };
+  }
+  return { variable: false, dilate: bold ? fontSize * SYNTHETIC_BOLD_FRAC : 0 };
+}
 
 /** Stable cache key for a glyph outline at given options. */
 export function glyphKey(commands, upem, opts = {}) {
@@ -146,6 +277,7 @@ export function orderGlyphStrokes(strokes) {
  *            scale:number, lineHeight:number, maxWidth:number, lineCount:number}}
  */
 export function placeGlyphs(font, text, o) {
+  const weight = applyWeight(font, o.bold, o.fontSize);
   const scale = o.fontSize / font.unitsPerEm;
   const lineHeight = o.lineHeight ?? o.fontSize * 1.35;
 
@@ -167,13 +299,18 @@ export function placeGlyphs(font, text, o) {
         // getKerningValue reads both `kern` and GPOS pair positioning
         penX += font.getKerningValue(glyphs[i - 1], glyph) || 0;
       }
+      // On a variable face `advanceWidth` is only brought up to date with the
+      // HVAR table as a *side effect* of the variation transform, which nothing
+      // else here triggers -- reading it straight would lay bold text out on
+      // regular metrics and leave the letters overlapping.
+      if (weight.variable) font.variation.getTransform(glyph);
       placements.push({ glyph, ch: chars[i], penX, lineIndex });
       penX += glyph.advanceWidth;
     });
     maxWidth = Math.max(maxWidth, penX);
   });
 
-  return { placements, scale, lineHeight, maxWidth, lineCount: lines.length };
+  return { placements, scale, lineHeight, maxWidth, lineCount: lines.length, weight };
 }
 
 /** The drawable's bounds, padded for a pen that overshoots its centreline. */
@@ -259,8 +396,13 @@ export async function layoutText(font, text, o) {
  *            height:number, inkBbox:number[]}}
  */
 export function outlineText(font, text, o) {
-  const { placements, scale, lineHeight, maxWidth, lineCount } = placeGlyphs(font, text, o);
+  const { placements, scale, lineHeight, maxWidth, lineCount, weight } = placeGlyphs(font, text, o);
   const color = o.color ?? '#1a1a1a';
+  // Half the synthetic bold width, which is how far the emboldening stroke
+  // reaches outside the letterform's own outline. Zero on a variable face --
+  // there the extra weight is already in the rings.
+  const dilate = weight.dilate;
+  const grow = dilate / 2;
   // Flattening tolerance in object units. Tied to the size the text is drawn at
   // rather than fixed, or a 400px headline goes visibly faceted.
   const eps = Math.max(0.05, o.fontSize * 0.0025);
@@ -288,8 +430,11 @@ export function outlineText(font, text, o) {
     // opentype positions and scales the outline for us, and emits y-down --
     // exactly the mapping layoutText applies by hand to its centrelines, so the
     // two agree and a clip can be switched between animations without moving.
-    const path = p.glyph.getPath(p.penX * scale, p.lineIndex * lineHeight, o.fontSize);
-    const rings = flattenPath(path.toPathData(3), { eps })
+    // The 5th argument is what applies the variation: without it opentype.js
+    // silently hands back the default instance, and bold would be a no-op on
+    // every face that can actually do it.
+    const path = p.glyph.getPath(p.penX * scale, p.lineIndex * lineHeight, o.fontSize, {}, font);
+    const rings = flattenCommands(path.commands, { eps })
       .map((s) => s.pts)
       .filter((pts) => pts.length >= 6);
     if (!rings.length) {
@@ -306,6 +451,11 @@ export function outlineText(font, text, o) {
         if (pts[i + 1] > y1) y1 = pts[i + 1];
       }
     }
+    // Everything downstream sizes itself off these bounds -- the reveal band in
+    // `textReveal`, the glyph wipe in `handwrite`, and `inkBbox` for the eraser
+    // -- so growing them here is the single place synthetic bold has to be
+    // accounted for.
+    x0 -= grow; y0 -= grow; x1 += grow; y1 += grow;
     line.y0 = Math.min(line.y0, y0);
     line.y1 = Math.max(line.y1, y1);
 
@@ -317,7 +467,9 @@ export function outlineText(font, text, o) {
     line.broke = false;
 
     const regionIndex = regions.length;
-    regions.push({ rings, color });
+    // `dilate` is omitted rather than set to 0 when it does not apply, so a
+    // non-bold layout serialises byte-identically to what it did before.
+    regions.push(dilate > 0 ? { rings, color, dilate } : { rings, color });
     glyphs.push({ ch: p.ch, lineIndex: p.lineIndex, ink: true, regionIndex,
       rings, bbox: [x0, y0, x1, y1] });
   }

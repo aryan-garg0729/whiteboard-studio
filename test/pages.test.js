@@ -16,7 +16,8 @@ import { setSurfaceFactory } from '../src/engine/render/surfaces.js';
 import { createSession, ensureSurfaces, renderFrame } from '../src/engine/render/renderFrame.js';
 import { normalizeProject, pageStateAt, pageWindows } from '../src/engine/model/project.js';
 import { flattenPath } from '../src/engine/compile/svgPath.js';
-import outlineFill from '../src/engine/anim/outlineFill.js';
+import stencilPaint from '../src/engine/anim/stencilPaint.js';
+import { installArt, squareImage } from './helpers/art.js';
 
 setSurfaceFactory((w, h) => {
   const canvas = createCanvas(w, h);
@@ -104,20 +105,9 @@ test('a project with no breaks is one page, settled, forever', () => {
 
 // ── rendering ───────────────────────────────────────────────────────
 
-/** A filled square, so "is this page visible" is a pixel question. */
-const square = (id, x0, y0) => ({
-  id,
-  bbox: [x0, y0, x0 + 60, y0 + 60],
-  subpaths: flattenPath(`M ${x0} ${y0} L ${x0 + 60} ${y0} L ${x0 + 60} ${y0 + 60} `
-    + `L ${x0} ${y0 + 60} Z`, { eps: 0.2 }),
-  regions: [{
-    rings: [Float64Array.from([
-      x0, y0, x0 + 60, y0, x0 + 60, y0 + 60, x0, y0 + 60, x0, y0,
-    ])],
-    bbox: [x0, y0, x0 + 60, y0 + 60],
-    color: id === 'red' ? '#ff0000' : '#0000ff',
-  }],
-});
+/** Filled squares, so "is this page visible" is a pixel question. */
+const RED = '#ff0000';
+const BLUE = '#0000ff';
 
 /** Page A carries a red square left of centre, page B a blue one right of it. */
 async function twoPageSession() {
@@ -133,19 +123,24 @@ async function twoPageSession() {
       blue: { kind: 'vector', src: 'y.svg' },
     },
     clips: [
-      { id: 'ca', assetId: 'red', animId: 'draw.outlineFill', pageId: 'a',
+      { id: 'ca', assetId: 'red', animId: 'draw.stencilPaint', pageId: 'a',
         start: 0, duration: 2, transform: { x: A_X, y: -30, scale: 1, rotation: 0 } },
-      { id: 'cb', assetId: 'blue', animId: 'draw.outlineFill', pageId: 'b',
+      { id: 'cb', assetId: 'blue', animId: 'draw.stencilPaint', pageId: 'b',
         start: 5.5, duration: 2, transform: { x: B_X, y: -30, scale: 1, rotation: 0 } },
     ],
   });
 
   const session = createSession();
-  session.plans.set('ca', await outlineFill.compile(square('red', 0, 0),
-    { brushWidth: 3, fillBrushWidth: 14 }));
-  session.plans.set('cb', await outlineFill.compile(square('blue', 0, 0),
-    { brushWidth: 3, fillBrushWidth: 14 }));
+  const opts = { fillBrushWidth: 14 };
+  // 60x60 and fully filled, matching the geometry the column assertions below
+  // were written against.
+  const redArt = squareImage(RED, 60, 0);
+  const blueArt = squareImage(BLUE, 60, 0);
+  session.plans.set('ca', await stencilPaint.compile({ id: 'red', image: redArt }, opts));
+  session.plans.set('cb', await stencilPaint.compile({ id: 'blue', image: blueArt }, opts));
   ensureSurfaces(session, project);
+  installArt(session, 'ca', redArt);
+  installArt(session, 'cb', blueArt);
   return { session, project };
 }
 

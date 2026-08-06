@@ -283,7 +283,7 @@ export class Studio {
 
   /** Reword a caption, change its face, size or colour. Always structural. */
   updateAsset(name, id, patch) {
-    const allowed = ['text', 'font', 'fontSize', 'penWidth', 'color', 'src', 'trace'];
+    const allowed = ['text', 'font', 'fontSize', 'penWidth', 'color', 'bold', 'src'];
     for (const k of Object.keys(patch)) {
       if (!allowed.includes(k)) {
         throw new edits.EditError(`an asset has no field ${JSON.stringify(k)}; `
