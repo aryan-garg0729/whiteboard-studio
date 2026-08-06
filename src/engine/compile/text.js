@@ -1,14 +1,16 @@
 /**
- * Text -> ordered handwriting strokes.
+ * Text -> letterforms, in pure JS.
  *
- * Split of responsibilities: JS owns typography (glyph selection, advance
- * widths, kerning, line layout) via opentype.js; the Python sidecar owns the
- * CV (skeletonisation into centrelines). The sidecar is sent glyph *outlines*
- * rather than characters, so it never needs the font file and two fonts
- * sharing a glyph share one cache entry.
+ * Typography -- glyph selection, advance widths, kerning, line layout, variable
+ * weight -- all via opentype.js. `outlineText` keeps the real glyph outline and
+ * `traceText` adds the writing guides a hand follows over it, so the letters on
+ * screen are always the font's own.
  *
- * Stroke ordering and direction are applied here rather than in the sidecar so
- * they can be tuned without a round trip.
+ * There used to be a second route that shipped glyph outlines to a Python
+ * process to be skeletonised into centrelines, and drew *those*. It is gone,
+ * along with the sidecar: a centreline only reads correctly on a near-monoline
+ * face, and the guides in `textGuides.js` give the same gesture without
+ * replacing the letterform. Nothing here needs Python, or is asynchronous.
  */
 
 import { makeStroke } from './geometry.js';
@@ -146,132 +148,11 @@ export function applyWeight(font, bold, fontSize = 0) {
   return { variable: false, dilate: bold ? fontSize * SYNTHETIC_BOLD_FRAC : 0 };
 }
 
-/** Stable cache key for a glyph outline at given options. */
-export function glyphKey(commands, upem, opts = {}) {
-  let h = 2166136261 >>> 0;
-  const push = (s) => {
-    for (let i = 0; i < s.length; i++) {
-      h ^= s.charCodeAt(i);
-      h = Math.imul(h, 16777619);
-    }
-  };
-  push(`u${upem}|s${opts.supersample ?? 2}|p${opts.pruneFactor ?? 1.4}|`);
-  for (const c of commands) {
-    push(c.type);
-    for (const k of ['x', 'y', 'x1', 'y1', 'x2', 'y2']) {
-      if (c[k] != null) push(`${Math.round(c[k] * 4) / 4},`);
-    }
-  }
-  return (h >>> 0).toString(16);
-}
-
-/**
- * Classify a glyph's strokes so they can be ordered the way a person writes.
- *
- * Crossbars and tittles last is the single highest-value ordering rule -- it
- * is what makes a 't' or an 'i' read as handwriting rather than as assembly.
- */
-export function classifyStrokes(strokes, emSize) {
-  const boxes = strokes.map((s) => {
-    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-    for (const [x, y] of s.pts) {
-      if (x < x0) x0 = x; if (x > x1) x1 = x;
-      if (y < y0) y0 = y; if (y > y1) y1 = y;
-    }
-    return [x0, y0, x1, y1];
-  });
-  const maxLen = Math.max(1e-6, ...strokes.map((s) => s.length ?? 0));
-  const overlaps = (a, b) => a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3];
-
-  return strokes.map((s, i) => {
-    const b = boxes[i];
-    const diag = Math.hypot(b[2] - b[0], b[3] - b[1]);
-    const dx = Math.abs(b[2] - b[0]);
-    const dy = Math.abs(b[3] - b[1]);
-    const touchesOther = boxes.some((o, j) => j !== i && overlaps(b, o));
-
-    let role = 'main';
-    if (diag < 0.18 * emSize && !touchesOther) role = 'dot';
-    else if ((s.length ?? 0) < 0.45 * maxLen && dy < 0.25 * dx && touchesOther) role = 'bar';
-    return { ...s, role, bbox: b };
-  });
-}
-
-/** Signed area; positive means counter-clockwise in y-up font units. */
-function ringArea(pts) {
-  let a = 0;
-  for (let i = 0; i < pts.length; i++) {
-    const [x0, y0] = pts[i];
-    const [x1, y1] = pts[(i + 1) % pts.length];
-    a += x0 * y1 - x1 * y0;
-  }
-  return a / 2;
-}
-
-/**
- * Orient a stroke the way a right-handed writer would draw it.
- *
- * Open strokes run predominantly down, tie-breaking to the right. Closed rings
- * (o, the bowl of a d) start at the top and run counter-clockwise on screen --
- * getting that backwards is instantly noticeable to a viewer even though they
- * usually cannot say why.
- */
-export function orientStroke(s) {
-  const pts = s.pts.slice();
-  const closed = pts.length > 3
-    && Math.hypot(pts[0][0] - pts[pts.length - 1][0],
-                  pts[0][1] - pts[pts.length - 1][1]) < 4;
-
-  if (closed) {
-    // font units are y-up; screen-space counter-clockwise is clockwise here
-    if (ringArea(pts) > 0) pts.reverse();
-    let top = 0;
-    for (let i = 1; i < pts.length; i++) if (pts[i][1] > pts[top][1]) top = i;
-    const rotated = pts.slice(top).concat(pts.slice(0, top));
-    rotated.push(rotated[0]);
-    return { ...s, pts: rotated, closed: true };
-  }
-
-  const a = pts[0];
-  const b = pts[pts.length - 1];
-  const dy = b[1] - a[1];
-  const dx = b[0] - a[0];
-  // y-up: "downward" means decreasing y
-  const flip = dy > Math.abs(dx) * 0.2 || (Math.abs(dy) <= Math.abs(dx) * 0.2 && dx < 0);
-  return { ...s, pts: flip ? pts.reverse() : pts, closed: false };
-}
-
-/** main strokes first (top-down, left-right), then crossbars, then tittles. */
-export function orderGlyphStrokes(strokes) {
-  const rank = { main: 0, bar: 1, dot: 2 };
-  return strokes.slice().sort((p, q) => {
-    const r = rank[p.role] - rank[q.role];
-    if (r) return r;
-    const py = p.pts[0][1];
-    const qy = q.pts[0][1];
-    if (Math.abs(py - qy) > 1e-6) return qy - py;      // y-up: higher first
-    return p.pts[0][0] - q.pts[0][0];
-  });
-}
-
-/**
- * Lay out a string and return the strokes to draw, in object space (y-down).
- *
- * @param {Object} font an opentype.js Font
- * @param {string} text
- * @param {Object} o
- * @param {number} o.fontSize
- * @param {(commands:Array, key:string) => Promise<{strokes:Array}>} o.getSkeleton
- * @param {number} [o.lineHeight]
- * @param {number} [o.penWidth]
- * @param {number} [o.letterGap] pen-lift travel threshold, object units
- */
 /**
  * Lay the string out: which glyph goes where, in font units.
  *
  * Shared by both text animations, because typography is typography however the
- * letters are later revealed. Everything after this point differs -- one path
- * asks the sidecar for centrelines, the other keeps the filled outline.
+ * letters are later revealed.
  *
  * @returns {{placements:{glyph:Object, penX:number, lineIndex:number}[],
  *            scale:number, lineHeight:number, maxWidth:number, lineCount:number}}
@@ -317,80 +198,11 @@ export function placeGlyphs(font, text, o) {
 const textBbox = (fontSize, w, h) =>
   [-fontSize * 0.3, -fontSize * 1.1, w + fontSize * 0.3, h + fontSize * 0.4];
 
-export async function layoutText(font, text, o) {
-  const upem = font.unitsPerEm;
-  const { placements, scale, lineHeight, maxWidth, lineCount } = placeGlyphs(font, text, o);
-
-  // One sidecar request per distinct glyph outline, not per occurrence.
-  const unique = new Map();
-  for (const p of placements) {
-    const commands = p.glyph.path.commands;
-    if (!commands.length) continue;
-    const key = glyphKey(commands, upem);
-    p.key = key;
-    if (!unique.has(key)) unique.set(key, commands);
-  }
-
-  const skeletons = new Map();
-  for (const [key, commands] of unique) {
-    skeletons.set(key, await o.getSkeleton(commands, key));
-  }
-
-  const strokes = [];
-  let pen = null;
-  const penWidth = o.penWidth ?? Math.max(1.5, o.fontSize * 0.045);
-  const letterGap = o.letterGap ?? penWidth * 2;
-
-  for (const p of placements) {
-    const sk = p.key && skeletons.get(p.key);
-    if (!sk || !sk.strokes || !sk.strokes.length) continue;
-
-    let glyphStrokes = classifyStrokes(sk.strokes, upem).map(orientStroke);
-    glyphStrokes = orderGlyphStrokes(glyphStrokes);
-
-    for (const gs of glyphStrokes) {
-      const pts = [];
-      for (const [fx, fy] of gs.pts) {
-        // font units (y-up) -> object space (y-down), positioned on the line
-        pts.push((p.penX + fx) * scale,
-                 (p.lineIndex * lineHeight) - fy * scale);
-      }
-      if (pts.length < 4) continue;
-
-      const start = [pts[0], pts[1]];
-      if (pen && Math.hypot(start[0] - pen[0], start[1] - pen[1]) > letterGap) {
-        strokes.push(travelArc(pen, start));
-      }
-      strokes.push(makeStroke(pts, {
-        kind: 'OUTLINE', width: penWidth, color: o.color ?? '#1a1a1a',
-      }));
-      pen = [pts[pts.length - 2], pts[pts.length - 1]];
-    }
-  }
-
-  const w = maxWidth * scale;
-  const h = lineCount * lineHeight;
-  return {
-    strokes,
-    bbox: textBbox(o.fontSize, w, h),
-    width: w,
-    height: h,
-    // Aggregate across the string: a single glyph's modulation is noisy
-    // (DejaVu Sans's 'k' scores 0.21 against a 0.22 threshold), but the mean
-    // over a font separates cleanly -- Sans ~0.09, Serif ~0.25.
-    modulation: meanModulation([...skeletons.values()]),
-    monoline: meanModulation([...skeletons.values()]) < 0.22,
-  };
-}
-
 /**
  * Text -> filled letterforms, plus the geometry a left-to-right reveal needs.
  *
- * The counterpart to `layoutText`. That one throws the outline away and keeps a
- * skeleton traced down the middle of each letter, which only reads correctly on
- * near-monoline faces. This keeps the outline itself, so the letters *are* the
- * font -- and, because no centreline is needed, it never touches the sidecar and
- * is therefore synchronous and instant.
+ * The outline itself, so the letters *are* the font. No centreline is traced
+ * anywhere, which is why this is synchronous and instant.
  *
  * @returns {{regions:Array, lines:Array, bbox:number[], width:number,
  *            height:number, inkBbox:number[]}}
@@ -427,9 +239,7 @@ export function outlineText(font, text, o) {
       continue;
     }
 
-    // opentype positions and scales the outline for us, and emits y-down --
-    // exactly the mapping layoutText applies by hand to its centrelines, so the
-    // two agree and a clip can be switched between animations without moving.
+    // opentype positions and scales the outline for us, and emits y-down.
     // The 5th argument is what applies the variation: without it opentype.js
     // silently hands back the default instance, and bold would be a no-op on
     // every face that can actually do it.
@@ -550,11 +360,6 @@ export function traceText(font, text, o) {
     joined.push(guide);
   }
   return { ...layout, guides: joined };
-}
-
-function meanModulation(list) {
-  const vals = list.map((s) => s.modulation).filter((v) => typeof v === 'number');
-  return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
 }
 
 /** Pen-up hop between letters, bulged so the hand lifts over the writing. */

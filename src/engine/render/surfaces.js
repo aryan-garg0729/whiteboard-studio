@@ -146,10 +146,9 @@ export class ClipSurfaces {
     this.originX = originX;
     this.originY = originY;
     this.art = null;          // built lazily; holds the true colours to reveal
-    this.ink = new Layer(w, h);
     this.fill = new Layer(w, h);
     this.erase = new Layer(w, h);
-    for (const l of [this.ink, this.fill, this.erase]) l.setOrigin(originX, originY);
+    for (const l of [this.fill, this.erase]) l.setOrigin(originX, originY);
     this.maskUnion = newSurface(w, h);
     this.reveal = newSurface(w, h);
     this.out = newSurface(w, h);
@@ -165,7 +164,6 @@ export class ClipSurfaces {
   }
 
   resetAll() {
-    this.ink.reset();
     this.fill.reset();
     this.erase.reset();
     this.lastProgress = -1;
@@ -174,29 +172,17 @@ export class ClipSurfaces {
   /**
    * Compose this clip's layers into `out`.
    *
-   * Order matters in three ways:
-   *  - the fill reveal goes down first, then ink on top, so scribble overshoot
-   *    cannot nibble the outline;
-   *  - `destination-in` against `art` is what turns a mask into true colour;
-   *  - erase is `destination-out` on *this clip's* layer only. Applying it to
-   *    the page would punch a hole through the background and every clip
-   *    beneath it.
+   * Every animation lays a *mask* into `fill` and `art` holds the true colours,
+   * so the whole of compositing is: union the mask, intersect the artwork with
+   * it, then subtract the eraser.
    *
-   * @param {boolean} clearInkUnderFill knock the ink layer out wherever the
-   *   fill mask has landed. `draw.stencilPaint` sketches a pencil stencil into
-   *   `ink` and then paints the real artwork over it, and since the artwork is
-   *   opaque the pencil would otherwise sit on top of the finished picture --
-   *   the sketch has to disappear exactly as the colour covers it. Opt-in
-   *   rather than automatic: handwriting's ink *is* its artwork, and clearing it
-   *   there would rub the letters out as they were written.
-   * @param {number} settle 0 = the drawn look, 1 = the original artwork.
-   *   The pen traces contours at an ink width chosen to read as drawing, which
-   *   is deliberately heavier than the source asset's own lines. Once the
-   *   drawing finishes there is no reason to keep the surrogate, so the clip
-   *   crossfades to the real thing. Only meaningful when `art` exists --
-   *   handwriting has no separate original, the ink *is* the artwork.
+   * There used to be more -- a pencil stencil in its own `ink` layer, knocked
+   * out as paint covered it, and a crossfade from the pen's heavier surrogate
+   * to the real artwork once a clip finished. Both are gone: no animation draws
+   * a surrogate any more, so there is nothing to knock out and nothing to fade
+   * to. See `doc.md` for the history.
    */
-  composite(settle = 0, clearInkUnderFill = false) {
+  composite() {
     const o = this.out.ctx;
     o.setTransform(1, 0, 0, 1, 0, 0);
     o.globalCompositeOperation = 'copy';
@@ -229,85 +215,9 @@ export class ClipSurfaces {
       o.drawImage(this.reveal.canvas, 0, 0);
     }
 
-    // Settling fades the artwork in and the pen's ink out, *over* the revealed
-    // fill rather than instead of it.
-    //
-    // Crossfading the whole composite would be wrong: at settle 0.5 the result
-    // is 0.5 art over 0.5 drawn, which is 0.75 alpha, and the clip visibly
-    // dips translucent halfway through. Keeping the reveal underneath at full
-    // alpha holds the body opaque, because by the end of the draw the fill
-    // mask already covers the region -- the reveal *is* the artwork there. The
-    // only things that actually change are the pen's heavier outline (out) and
-    // the asset's own finer lines (in).
-    if (settle > 0 && this.art) {
-      // Mask the artwork by everything the clip actually drew.
-      //
-      // A source PNG usually has an opaque background, so blitting it whole
-      // paints a white rectangle over the paper -- the drawable's bounding box,
-      // visible as a panel behind the artwork. Intersecting with ink + fill
-      // keeps exactly the marks that were made: the pen's stroke is at least as
-      // wide as the line it stands in for, and the fill mask covers the
-      // regions, so nothing real is clipped away.
-      const m = this.maskUnion.ctx;
-      m.globalCompositeOperation = 'copy';
-      m.drawImage(this.fill.committed.canvas, 0, 0);
-      m.globalCompositeOperation = 'source-over';
-      m.drawImage(this.fill.active.canvas, 0, 0);
-      m.drawImage(this.ink.committed.canvas, 0, 0);
-      m.drawImage(this.ink.active.canvas, 0, 0);
-
-      // `reveal` has already been blitted into `out`, so it is free scratch.
-      const r = this.reveal.ctx;
-      r.globalCompositeOperation = 'copy';
-      r.drawImage(this.art.canvas, 0, 0);
-      r.globalCompositeOperation = 'destination-in';
-      r.drawImage(this.maskUnion.canvas, 0, 0);
-      r.globalCompositeOperation = 'source-over';
-
-      o.globalAlpha = settle;
-      o.drawImage(this.reveal.canvas, 0, 0);
-      o.globalAlpha = 1 - settle;
-    }
-
-    if (clearInkUnderFill && this.ink.used) {
-      // Composed in `reveal` -- free scratch by now, its contents already
-      // blitted into `out` -- rather than mutating the ink layer itself, which
-      // accumulates across frames and must stay exactly what was drawn: a
-      // destructive edit would make the pencil vanish permanently on a seek
-      // backwards, and `renderFrame` must stay a pure function of t.
-      const m = this.maskUnion.ctx;
-      m.globalCompositeOperation = 'copy';
-      m.drawImage(this.fill.committed.canvas, 0, 0);
-      m.globalCompositeOperation = 'source-over';
-      m.drawImage(this.fill.active.canvas, 0, 0);
-
-      const r = this.reveal.ctx;
-      r.globalCompositeOperation = 'copy';
-      r.drawImage(this.ink.committed.canvas, 0, 0);
-      r.globalCompositeOperation = 'source-over';
-      r.drawImage(this.ink.active.canvas, 0, 0);
-      r.globalCompositeOperation = 'destination-out';
-      r.drawImage(this.maskUnion.canvas, 0, 0);
-      // Clipped to the artwork's own silhouette as well. A stencil line is
-      // centred on a colour boundary, so half its width lands on whatever is
-      // outside the shape -- on a cut-out PNG that is transparent paper, which
-      // no group owns and therefore no mask ever covers, and the pencil would
-      // survive there for good.
-      if (this.art) {
-        r.globalCompositeOperation = 'destination-in';
-        r.drawImage(this.art.canvas, 0, 0);
-      }
-      r.globalCompositeOperation = 'source-over';
-
-      o.drawImage(this.reveal.canvas, 0, 0);
-      o.globalAlpha = 1;
-    } else {
-      o.drawImage(this.ink.committed.canvas, 0, 0);
-      o.drawImage(this.ink.active.canvas, 0, 0);
-      o.globalAlpha = 1;
-    }
-
     if (this.erase.used) {
+      // `destination-out` on *this clip's* layer only. Applying it to the page
+      // would punch a hole through the background and every clip beneath it.
       o.globalCompositeOperation = 'destination-out';
       o.drawImage(this.erase.committed.canvas, 0, 0);
       o.drawImage(this.erase.active.canvas, 0, 0);

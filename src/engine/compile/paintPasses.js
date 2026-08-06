@@ -5,13 +5,7 @@
  * either as one zig-zag sweep across the whole picture or group by group in
  * colour order.
  *
- * There used to be a pencil stencil first -- the group boundaries sketched in
- * grey, then rubbed out by `composite()` as paint landed over them. It is gone.
- * A sketch that gets erased is a detour: it spends a third of the clip drawing
- * something that is not the artwork and is guaranteed to disappear, and on a
- * picture whose boundaries are already its linework it drew a second, greyer
- * outline just inside the real one. Artwork that wants its outline drawn first
- * now has `draw.inkPaint`, which inks the *real* line and leaves it there.
+ * There is no pencil stencil before it any more; see `doc.md` for why it went.
  *
  * Coverage is never left to the brush. Each stroke may carry a `closure` -- the
  * exact pixels it is responsible for having revealed by the time it finishes --
@@ -35,6 +29,9 @@ import { orderGroups } from './pixels.js';
  * invisible.
  */
 const CHUNK_POINTS = 120;
+
+/** Mask colour. Every stroke lays coverage, never pigment. */
+export const MASK = '#ffffff';
 
 /** The image's own rectangle, as a single ring for the zig-zag sweep. */
 const rectRing = (w, h) => Float64Array.from([0, 0, w, 0, w, h, 0, h]);
@@ -109,51 +106,60 @@ function zigzagStrokes(analysis, params, closure) {
   if (mirror) for (let i = 0; i < pts.length; i += 2) pts[i] = -pts[i];
 
   const strokes = chunkPolyline(pts).map((c) => makeStroke(c, {
-    kind: 'FILL', width, color: '#ffffff',
+    kind: 'FILL', width, color: MASK,
   }));
   if (strokes.length) strokes[strokes.length - 1].closure = closure;
   return strokes;
 }
 
 /**
- * Group by group, in colour order, each closed by its own exact pixel mask.
+ * Scribble a list of regions one at a time, each closed by its own pixel mask.
  *
- * A group whose shapes were all too small to scribble still owns pixels, so its
- * closure is carried forward and hung on the next stroke that exists -- the same
- * trick the old fill used for regions it declined to scribble, and the reason
- * "no scribble" never means "no coverage".
+ * The shared body of both colour passes: `draw.stencilPaint` hands it colour
+ * groups, `draw.inkPaint` hands it the connected shapes those groups split
+ * into. The sequencing is the same either way and so are the two rules that
+ * matter -- a region too small to scribble still owns pixels, so its closure is
+ * carried forward onto the next stroke that exists, and the very last stroke
+ * takes the whole-image backstop so `u = 1` is complete no matter what.
+ *
+ * A wider brush for a bigger area, which is both what a person does and the
+ * only thing that keeps the clip's pacing honest. Scribble length grows with
+ * area / spacing, so at one fixed width a flat background costs time in
+ * proportion to its area -- and a picture on white spent half its clip
+ * colouring white onto white paper, with nothing whatever appearing to happen.
+ * Scaling the brush by the square root of the area makes the time a region
+ * takes grow with its *diameter* instead, so a large wash is laid in broad
+ * strokes and the detail still gets its share of the clip.
+ *
+ * @param {Array} regions each `{rings, rects, area}` plus whatever `seedOf` and
+ *   `regionId` need; already in the order they should be painted
+ * @param {Object} o
+ * @param {{sx:number, sy:number}} o.mask scale from mask grid to object space
+ * @param {(r:Object) => string} o.seedOf stable seed key per region
+ * @param {(r:Object) => number} o.regionId what to tag the strokes with
+ * @param {Array} o.backstop closure hung on the final stroke
  */
-function colorGroupStrokes(analysis, params, closure) {
+export function scribbleRegions(regions, { mask, params, seedOf, regionId, backstop }) {
   const base = params.fillBrushWidth ?? 14;
   const angle = params.sweepAngle ?? -45;
-  const ordered = orderGroups(analysis.groups, params.groupOrder);
 
-  // A wider brush for a bigger area, which is both what a person does and the
-  // only thing that keeps the clip's pacing honest. Scribble length grows with
-  // area / spacing, so at one fixed width a flat background costs time in
-  // proportion to its area -- and a picture on white spent half its clip
-  // colouring white onto white paper, with nothing whatever appearing to
-  // happen. Scaling the brush by the square root of the area makes the time a
-  // group takes grow with its *diameter* instead, so a large wash is laid in
-  // broad strokes and the detail still gets its share of the clip.
-  const mean = analysis.groups.reduce((s, g) => s + g.area, 0)
-    / Math.max(1, analysis.groups.length);
-  const widthFor = (g) =>
-    base * Math.max(1, Math.min(5, Math.sqrt(g.area / Math.max(1, mean))));
+  const mean = regions.reduce((s, r) => s + r.area, 0) / Math.max(1, regions.length);
+  const widthFor = (r) =>
+    base * Math.max(1, Math.min(5, Math.sqrt(r.area / Math.max(1, mean))));
 
   const strokes = [];
   let pending = [];
   let pen = null;
 
-  for (const group of ordered) {
-    const mine = { rects: group.rects, sx: analysis.mask.sx, sy: analysis.mask.sy };
-    if (!group.rings.length) { pending.push(mine); continue; }
-    const width = widthFor(group);
+  for (const region of regions) {
+    const mine = { rects: region.rects, sx: mask.sx, sy: mask.sy };
+    if (!region.rings.length) { pending.push(mine); continue; }
+    const width = widthFor(region);
 
-    const { pts } = scribbleRegion(group.rings, {
+    const { pts } = scribbleRegion(region.rings, {
       brushWidth: width,
       angleDeg: angle,
-      seed: hashSeed(`${params.seedKey || 'paint'}|${group.label}`),
+      seed: hashSeed(seedOf(region)),
     });
     const chunks = chunkPolyline(pts);
     if (!chunks.length) { pending.push(mine); continue; }
@@ -163,8 +169,9 @@ function colorGroupStrokes(analysis, params, closure) {
       if (gap > width * 2) strokes.push(travelStroke(pen, [chunks[0][0], chunks[0][1]]));
     }
     for (const c of chunks) {
-      strokes.push(makeStroke(c, { kind: 'FILL', width, color: '#ffffff',
-        regionId: group.label }));
+      strokes.push(makeStroke(c, {
+        kind: 'FILL', width, color: MASK, regionId: regionId(region),
+      }));
     }
     const last = chunks[chunks.length - 1];
     pen = [last[last.length - 2], last[last.length - 1]];
@@ -174,10 +181,8 @@ function colorGroupStrokes(analysis, params, closure) {
   }
 
   if (strokes.length) {
-    // Anything still pending, plus the whole-image backstop, lands on the very
-    // last stroke -- so `u = 1` is the complete picture no matter what.
     const last = strokes[strokes.length - 1];
-    last.closure = [...(last.closure || []), ...pending, ...closure];
+    last.closure = [...(last.closure || []), ...pending, ...backstop];
   }
   return strokes;
 }
@@ -195,7 +200,12 @@ export function buildPasses(analysis, params = {}) {
     rects: g.rects, sx: analysis.mask.sx, sy: analysis.mask.sy,
   }));
 
-  return params.mode === 'colorGroups'
-    ? colorGroupStrokes(analysis, params, everything)
-    : zigzagStrokes(analysis, params, everything);
+  if (params.mode !== 'colorGroups') return zigzagStrokes(analysis, params, everything);
+  return scribbleRegions(orderGroups(analysis.groups, params.groupOrder), {
+    mask: analysis.mask,
+    params,
+    seedOf: (g) => `${params.seedKey || 'paint'}|${g.label}`,
+    regionId: (g) => g.label,
+    backstop: everything,
+  });
 }

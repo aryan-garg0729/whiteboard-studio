@@ -8,16 +8,15 @@
 
 import { setSurfaceFactory } from '../engine/render/surfaces.js';
 import { createSession, ensureSurfaces, renderFrame } from '../engine/render/renderFrame.js';
-import { makeStroke } from '../engine/compile/geometry.js';
 import { compileErase } from '../engine/anim/erase.js';
 import { getAnimation } from '../engine/anim/registry.js';
 import { paintVectorArt } from '../engine/render/vectorArt.js';
 import { imagePixels, vectorPixels } from '../engine/render/rasterize.js';
 // Imported for their registration side effect as much as for their exports:
 // `getAnimation` can only hand back what has been registered.
-import stencilPaint from '../engine/anim/stencilPaint.js';
+import '../engine/anim/stencilPaint.js';
 import '../engine/anim/inkPaint.js';
-import appear, { isAppear } from '../engine/anim/appear.js';
+import { isAppear } from '../engine/anim/appear.js';
 import handwrite from '../engine/anim/handwrite.js';
 import textReveal from '../engine/anim/textReveal.js';
 
@@ -61,7 +60,7 @@ export async function buildSession(loaded) {
     const p = prepared[clip.id];
     let plan;
 
-    if (p.kind === 'text' && (p.mode === 'reveal' || p.mode === 'trace')) {
+    if (p.kind === 'text') {
       // Both the reveal and the entrances draw filled letterforms; only the
       // reveal needs the line/span layout to walk a frontier along.
       plan = p.mode === 'trace'
@@ -84,12 +83,6 @@ export async function buildSession(loaded) {
         });
       // Both text drawing modes are masks over the actual glyph outlines.
       artJobs.push({ clipId: clip.id, prepared: p });
-    } else if (p.kind === 'text') {
-      const strokes = p.strokes.map((s) => makeStroke(f64(s.pts), {
-        kind: s.lift ? 'TRAVEL' : 'OUTLINE',
-        width: s.width, color: s.color, lift: s.lift,
-      }));
-      plan = await handwrite.compile({ layout: { strokes, bbox: p.bbox } });
     } else {
       // Both artwork kinds are planned from pixels. A vector is rasterised from
       // the geometry the main process parsed; a raster is simply decoded. This
@@ -113,7 +106,7 @@ export async function buildSession(loaded) {
         image = imagePixels(decoded, decoded.width, decoded.height);
       }
 
-      plan = await getAnimation(clip.animId ?? 'draw.stencilPaint')
+      plan = await getAnimation(clip.animId)
         .compile({ id: clip.assetId, image }, {
           // Pen widths are chosen so the stroke is a constant width *on screen*.
           // An entrance has no pen and ignores them.

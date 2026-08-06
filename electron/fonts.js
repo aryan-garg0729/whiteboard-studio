@@ -29,20 +29,13 @@ export function bundledFontPath(file) {
 }
 
 /**
- * Can opentype.js actually read this face?
+ * Parse a face once and report what the picker needs to know about it.
  *
  * Not every well-formed font survives the parser -- Roboto and Lora both throw
  * on their GSUB coverage tables ("lookupType: 6 substFormat: 2"). Offering one
  * of those means the user picks it and gets a parser message instead of
- * handwriting, with nothing pointing at the font. Checking nine files at
- * startup is cheap.
- */
-export function isUsable(path) {
-  return inspect(path) !== null;
-}
-
-/**
- * Parse a face once and report what the picker needs to know about it.
+ * handwriting, with nothing pointing at the font, so a face that cannot be
+ * parsed is simply not listed. Checking nine files at startup is cheap.
  *
  * @returns {{boldMode:'variable'|'synthetic'}|null} null when the parser rejects it
  */

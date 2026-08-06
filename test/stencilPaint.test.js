@@ -11,70 +11,25 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readdirSync } from 'node:fs';
 import { createCanvas, loadImage } from '@napi-rs/canvas';
 
 import stencilPaint from '../src/engine/anim/stencilPaint.js';
 import { analyzeArtwork, orderGroups } from '../src/engine/compile/pixels.js';
 import { imagePixels } from '../src/engine/render/rasterize.js';
-import { ClipSurfaces, setSurfaceFactory } from '../src/engine/render/surfaces.js';
-import { twoToneImage } from './helpers/art.js';
+import { ClipSurfaces } from '../src/engine/render/surfaces.js';
+import { countDiff, drawToEnd, samples, twoToneImage } from './helpers/art.js';
+import { useTestSurfaces } from './helpers/surface.js';
 
-setSurfaceFactory((w, h) => {
-  const canvas = createCanvas(w, h);
-  return { canvas, ctx: canvas.getContext('2d') };
-});
+useTestSurfaces();
 
 const MODES = ['zigzag', 'colorGroups'];
-
-/** Every bundled raster, which between them cover line art and cut-out alpha. */
-const samples = () => [
-  new URL('../assets/demo/lineart.png', import.meta.url),
-  ...readdirSync(new URL('../assets/media/', import.meta.url))
-    .filter((f) => f.endsWith('.png'))
-    .map((f) => new URL(`../assets/media/${f}`, import.meta.url)),
-];
-
-/**
- * Draw a clip all the way through and hand back the finished pixels beside the
- * artwork as the engine holds it.
- *
- * The artwork surface is the honest comparison target, not the file on disk: a
- * canvas stores premultiplied alpha, so a partially transparent source cannot
- * survive a decode/read round trip byte for byte no matter what the animation
- * does. What is being pinned is that the animation adds and removes nothing.
- */
-async function drawToEnd(url, mode, steps = 90) {
-  const decoded = await loadImage(url);
-  const { width, height } = decoded;
-  const sf = new ClipSurfaces(width, height, 0, 0);
-  sf.ensureArt().ctx.drawImage(decoded, 0, 0);
-  const target = sf.art.ctx.getImageData(0, 0, width, height).data;
-
-  const plan = await stencilPaint.compile(
-    { id: 'a', image: imagePixels(decoded, width, height) }, { mode, colors: 8 });
-  for (let i = 0; i <= steps; i++) stencilPaint.advance(sf, plan, i / steps);
-
-  const out = sf.composite(0, false)
-    .getContext('2d').getImageData(0, 0, width, height).data;
-  return { out, target, plan, width, height };
-}
-
-const countDiff = (a, b) => {
-  let n = 0;
-  for (let i = 0; i < a.length; i += 4) {
-    if (a[i] !== b[i] || a[i + 1] !== b[i + 1]
-      || a[i + 2] !== b[i + 2] || a[i + 3] !== b[i + 3]) n++;
-  }
-  return n;
-};
 
 // ── the guarantee ─────────────────────────────────────────────────────
 
 for (const mode of MODES) {
   test(`the finished frame is the source image, exactly (${mode})`, async () => {
     for (const url of samples()) {
-      const { out, target } = await drawToEnd(url, mode);
+      const { out, target } = await drawToEnd(stencilPaint, url, { mode, colors: 8 });
       assert.equal(countDiff(out, target), 0,
         `${url.pathname.split('/').pop()} in ${mode} mode did not finish on the source image`);
     }
@@ -139,14 +94,12 @@ test('there is no stencil pass: the clip is paint from the first frame', async (
   sf.ensureArt();
   stencilPaint.advance(sf, plan, 0.2);
   assert.ok(sf.fill.used, 'paint lands from the start');
-  assert.ok(!sf.ink.used, 'and nothing is ever laid in the ink layer');
 });
 
 test('nothing is drawn in a stand-in colour, so there is no pencil to erase', async () => {
   const plan = await stencilPaint.compile({ id: 'a', image: twoToneImage() }, { mode: 'zigzag' });
   assert.equal(plan.clearInkUnderFill, undefined,
     'no pen ink is laid, so composite has nothing to knock out');
-  assert.equal(stencilPaint.settles, false, 'the artwork is already on screen');
 });
 
 test('a sweep direction actually changes where the pen starts', async () => {
@@ -213,7 +166,7 @@ test('a backward seek lands on the same pixels as playing forward', async () => 
     art.ctx.fillStyle = '#3366cc';
     art.ctx.fillRect(0, 0, 200, 200);
     for (const u of visit) stencilPaint.advance(sf, plan, u);
-    return sf.composite(0, false).getContext('2d').getImageData(0, 0, 200, 200).data;
+    return sf.composite().getContext('2d').getImageData(0, 0, 200, 200).data;
   };
 
   const forward = at([0.1, 0.2, 0.3, 0.4, 0.5, 0.6]);

@@ -17,8 +17,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readdirSync } from 'node:fs';
-import { createCanvas, loadImage } from '@napi-rs/canvas';
+import { createCanvas } from '@napi-rs/canvas';
 
 import inkPaint from '../src/engine/anim/inkPaint.js';
 import {
@@ -28,30 +27,11 @@ import {
 import {
   assignOwners, centerlines, chainSkeleton, maskFromRects, seedPolyline, thin,
 } from '../src/engine/compile/centerline.js';
-import { imagePixels } from '../src/engine/render/rasterize.js';
-import { ClipSurfaces, setSurfaceFactory } from '../src/engine/render/surfaces.js';
+import { ClipSurfaces } from '../src/engine/render/surfaces.js';
+import { countDiff, drawToEnd, samples } from './helpers/art.js';
+import { useTestSurfaces } from './helpers/surface.js';
 
-setSurfaceFactory((w, h) => {
-  const canvas = createCanvas(w, h);
-  return { canvas, ctx: canvas.getContext('2d') };
-});
-
-/** Every bundled raster, which between them cover line art and cut-out alpha. */
-const samples = () => [
-  new URL('../assets/demo/lineart.png', import.meta.url),
-  ...readdirSync(new URL('../assets/media/', import.meta.url))
-    .filter((f) => f.endsWith('.png'))
-    .map((f) => new URL(`../assets/media/${f}`, import.meta.url)),
-];
-
-const countDiff = (a, b) => {
-  let n = 0;
-  for (let i = 0; i < a.length; i += 4) {
-    if (a[i] !== b[i] || a[i + 1] !== b[i + 1]
-      || a[i + 2] !== b[i + 2] || a[i + 3] !== b[i + 3]) n++;
-  }
-  return n;
-};
+useTestSurfaces();
 
 /**
  * Synthetic whiteboard artwork: flat fills behind a thick black outline, with
@@ -93,26 +73,11 @@ function clipart({ noise = 3, size = 200, outline = 9 } = {}) {
   return { width: size, height: size, data };
 }
 
-async function drawToEnd(url, params = {}, steps = 90) {
-  const decoded = await loadImage(url);
-  const { width, height } = decoded;
-  const sf = new ClipSurfaces(width, height, 0, 0);
-  sf.ensureArt().ctx.drawImage(decoded, 0, 0);
-  const target = sf.art.ctx.getImageData(0, 0, width, height).data;
-
-  const plan = await inkPaint.compile(
-    { id: 'a', image: imagePixels(decoded, width, height) }, params);
-  for (let i = 0; i <= steps; i++) inkPaint.advance(sf, plan, i / steps);
-
-  const out = sf.composite(0, false).getContext('2d').getImageData(0, 0, width, height).data;
-  return { out, target, plan };
-}
-
 // ── the guarantee ─────────────────────────────────────────────────────
 
 test('the finished frame is the source image, exactly', async () => {
   for (const url of samples()) {
-    const { out, target } = await drawToEnd(url);
+    const { out, target } = await drawToEnd(inkPaint, url);
     assert.equal(countDiff(out, target), 0,
       `${url.pathname.split('/').pop()} did not finish on the source image`);
   }
@@ -141,7 +106,7 @@ test('a rasterised vector finishes on the source image too', async () => {
     { id: 'v', image: { width: size, height: size, data: image.data } }, {});
   for (let i = 0; i <= 60; i++) inkPaint.advance(sf, plan, i / 60);
 
-  const out = sf.composite(0, false).getContext('2d').getImageData(0, 0, size, size).data;
+  const out = sf.composite().getContext('2d').getImageData(0, 0, size, size).data;
   assert.equal(countDiff(out, target), 0);
 });
 
@@ -357,13 +322,11 @@ test('nothing is drawn in a stand-in colour, so there is no pencil to erase', as
   const plan = await inkPaint.compile({ id: 'a', image: clipart() }, {});
   assert.equal(plan.clearInkUnderFill, undefined,
     'inkPaint lays no pen ink, so composite has nothing to knock out');
-  assert.equal(inkPaint.settles, false, 'the artwork is already on screen');
 
   const sf = new ClipSurfaces(200, 200, 0, 0);
   sf.ensureArt();
   inkPaint.advance(sf, plan, plan.outlineShare * 0.5);
   assert.ok(sf.fill.used, 'the outline pass lays coverage into the fill layer');
-  assert.ok(!sf.ink.used, 'and never into the ink layer');
 });
 
 test('compiling twice gives byte-identical geometry', async () => {
@@ -397,7 +360,7 @@ test('a backward seek lands on the same pixels as playing forward', async () => 
     art.ctx.fillStyle = '#3366cc';
     art.ctx.fillRect(0, 0, 200, 200);
     for (const u of visit) inkPaint.advance(sf, plan, u);
-    return sf.composite(0, false).getContext('2d').getImageData(0, 0, 200, 200).data;
+    return sf.composite().getContext('2d').getImageData(0, 0, 200, 200).data;
   };
 
   assert.equal(countDiff(at([0.1, 0.2, 0.3, 0.4, 0.5, 0.6]), at([0.1, 0.9, 0.6])), 0,
@@ -439,7 +402,7 @@ test('artwork with no outline still compiles and still finishes exactly', async 
   const target = art.ctx.getImageData(0, 0, size, size).data;
 
   for (let i = 0; i <= 60; i++) inkPaint.advance(sf, plan, i / 60);
-  const out = sf.composite(0, false).getContext('2d').getImageData(0, 0, size, size).data;
+  const out = sf.composite().getContext('2d').getImageData(0, 0, size, size).data;
   assert.equal(countDiff(out, target), 0);
 });
 

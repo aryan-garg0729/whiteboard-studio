@@ -30,7 +30,7 @@ let seq = 0;
 const scratch = () => `test_${process.pid}_${++seq}`;
 const cleanup = (name) => rmSync(projectPath(name), { force: true });
 
-const ctx = () => ({ root: ROOT, sidecar: null, rel: readablePath });
+const ctx = () => ({ root: ROOT, rel: readablePath });
 
 // ── the sandbox ───────────────────────────────────────────────────────
 

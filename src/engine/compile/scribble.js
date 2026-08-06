@@ -172,7 +172,6 @@ export function clampWobble(wobble, overlap) {
  *
  * @param {Float64Array[]} rings outer ring first, then holes, in object space
  * @param {Object} opts
- * @param {number} opts.brushWidth
  * @param {number} [opts.angleDeg=-45]  sweep direction; -45 reads as colouring,
  *                                      0 reads as erasing
  * @param {number} [opts.overlap=0.35]  fraction of brush width overlapped per pass.
@@ -273,13 +272,3 @@ export function scribbleRegion(rings, opts = {}) {
   return { pts: out, spacing: d, cells: cells.length };
 }
 
-/** Convenience: scribble a region straight into a FILL Stroke. */
-export function scribbleStroke(rings, opts = {}) {
-  const { pts } = scribbleRegion(rings, opts);
-  return makeStroke(pts, {
-    kind: opts.kind ?? 'FILL',
-    width: opts.brushWidth ?? 8,
-    color: opts.color ?? '#000000',
-    regionId: opts.regionId ?? -1,
-  });
-}

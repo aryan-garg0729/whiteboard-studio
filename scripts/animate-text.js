@@ -65,12 +65,12 @@ async function main() {
   let layout;
 
   if (REVEAL) {
-    // No sidecar at all: the reveal keeps the filled outline, so there is no
+    // The reveal keeps the filled outline, so there is no
     // centreline to compute.
     layout = outlineText(font, TEXT, { fontSize: SIZE, penWidth: Math.max(2, SIZE * 0.05), bold: BOLD });
     const spans = layout.lines.reduce((n, l) => n + l.spans.length, 0);
     console.log(`  ${layout.regions.length} glyphs, ${spans} word span(s) in `
-              + `${((Date.now() - t0) / 1000).toFixed(2)}s (no sidecar)`);
+              + `${((Date.now() - t0) / 1000).toFixed(2)}s`);
     if (!layout.regions.length) throw new Error('no glyph outlines produced');
   } else {
     layout = traceText(font, TEXT, { fontSize: SIZE, penWidth: Math.max(2, SIZE * 0.05), bold: BOLD });

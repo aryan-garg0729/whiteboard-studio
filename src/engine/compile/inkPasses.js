@@ -21,14 +21,10 @@
  */
 
 import { makeStroke } from './geometry.js';
-import { orderStrokes, travelStroke } from './order.js';
-import { hashSeed, scribbleRegion } from './scribble.js';
-import { chunkPolyline } from './paintPasses.js';
+import { orderStrokes } from './order.js';
+import { chunkPolyline, MASK, scribbleRegions } from './paintPasses.js';
 import { encodeRectsMulti, orderGroups, pickInkLabels } from './pixels.js';
 import { assignOwners, centerlines, maskFromRects, seedPolyline } from './centerline.js';
-
-/** Mask colour. Every stroke in both passes lays coverage, never pigment. */
-const MASK = '#ffffff';
 
 /**
  * Where the ink pass gets cut into strokes.
@@ -178,62 +174,6 @@ function paintUnits(analysis, inkLabels) {
 }
 
 /**
- * The colour pass: one connected shape at a time, each closed by its own mask.
- *
- * A shape whose rings were too small to scribble still owns pixels, so its
- * closure is carried forward and hung on the next stroke that does exist --
- * "no scribble" never means "no coverage".
- */
-function paintStrokes(analysis, params, units, backstop) {
-  const base = params.fillBrushWidth ?? 14;
-  const angle = params.sweepAngle ?? -45;
-  const ordered = orderGroups(units, params.groupOrder ?? 'largestFirst');
-
-  // Brush scaled by the square root of area, for the reason `paintPasses.js`
-  // records: at one fixed width the time a shape takes grows with its area, so
-  // a big flat background spends half the clip painting white onto white.
-  const mean = units.reduce((s, u) => s + u.area, 0) / Math.max(1, units.length);
-  const widthFor = (u) => base * Math.max(1, Math.min(5, Math.sqrt(u.area / Math.max(1, mean))));
-
-  const strokes = [];
-  let pending = [];
-  let pen = null;
-
-  for (const unit of ordered) {
-    const mine = { rects: unit.rects, sx: analysis.mask.sx, sy: analysis.mask.sy };
-    if (!unit.rings.length) { pending.push(mine); continue; }
-    const width = widthFor(unit);
-
-    const { pts } = scribbleRegion(unit.rings, {
-      brushWidth: width,
-      angleDeg: angle,
-      seed: hashSeed(`${params.seedKey || 'ink'}|${unit.group}|${unit.label}`),
-    });
-    const chunks = chunkPolyline(pts);
-    if (!chunks.length) { pending.push(mine); continue; }
-
-    if (pen) {
-      const gap = Math.hypot(chunks[0][0] - pen[0], chunks[0][1] - pen[1]);
-      if (gap > width * 2) strokes.push(travelStroke(pen, [chunks[0][0], chunks[0][1]]));
-    }
-    for (const c of chunks) {
-      strokes.push(makeStroke(c, { kind: 'FILL', width, color: MASK, regionId: unit.group }));
-    }
-    const last = chunks[chunks.length - 1];
-    pen = [last[last.length - 2], last[last.length - 1]];
-
-    strokes[strokes.length - 1].closure = [...pending, mine];
-    pending = [];
-  }
-
-  if (strokes.length) {
-    const last = strokes[strokes.length - 1];
-    last.closure = [...(last.closure || []), ...pending, ...backstop];
-  }
-  return strokes;
-}
-
-/**
  * Build both passes for one piece of artwork.
  *
  * @param {ReturnType<import('./pixels.js').analyzeArtwork>} analysis compiled
@@ -250,7 +190,16 @@ export function buildInkPasses(analysis, params = {}) {
 
   const { strokes: ink, labels } = inkStrokes(analysis, params);
   const units = paintUnits(analysis, ink.length ? labels : []);
-  const paint = paintStrokes(analysis, params, units, backstop);
+  // `largestFirst` rather than `stencilPaint`'s `darkFirst`: that default exists
+  // so the dark linework goes down first and gives the picture its structure,
+  // but here the ink pass has already finished it, so the argument is spent.
+  const paint = scribbleRegions(orderGroups(units, params.groupOrder ?? 'largestFirst'), {
+    mask: analysis.mask,
+    params,
+    seedOf: (u) => `${params.seedKey || 'ink'}|${u.group}|${u.label}`,
+    regionId: (u) => u.group,
+    backstop,
+  });
 
   // Nothing to colour -- artwork that is linework and nothing else. The ink
   // pass then has to carry the backstop, or the last frame is missing whatever

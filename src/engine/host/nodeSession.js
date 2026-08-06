@@ -64,8 +64,17 @@ export function installNodeSurfaces() {
 
 /**
  * Which animation draws this clip. Preview and export must agree, so this is
- * the clip's own `animId` exactly as it is in the app -- the pre-reveal default
- * is kept for documents written before there was a choice.
+ * the clip's own `animId` exactly as it is in the app.
+ *
+ * Migrated here even though `buildNodeSession` normalises first, because
+ * `compileClip` is exported and is reached *without* normalising: measuring a
+ * clip is what a host does before it can place one, so a caller hands over a
+ * clip straight out of a document. `examples/svg.project.json` still names
+ * `draw.outlineFill`, and `test/nodeSession.test.js` compiles it directly.
+ *
+ * `src/ui/engineHost.js` deliberately does not do this: its input has always
+ * been through `normalizeProject`, so an unmigrated id there would be a bug
+ * worth surfacing rather than papering over.
  */
 const drawableAnim = (clip) =>
   getAnimation(migrateAnimation(clip.animId ?? 'draw.stencilPaint').animId);

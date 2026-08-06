@@ -26,13 +26,18 @@ export function drawHand(ctx, style, tip, tangent, frame, resolveImage) {
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.translate(sol.x, sol.y);
-  ctx.rotate(sol.rotation + (style.naturalAngleDeg ?? 0) * DEG * 0);
+  // `naturalAngleDeg` is deliberately *not* added. It records the sprite's own
+  // rest pose, which is already baked into the image, so adding it here would
+  // lean every hand twice (`rotationFor` in `rig.js` says the same). It used to
+  // be written `+ (style.naturalAngleDeg ?? 0) * DEG * 0` -- multiplied by zero
+  // rather than deleted, which reads as an accident rather than a decision.
+  ctx.rotate(sol.rotation);
   ctx.scale(sol.scale, sol.scale);
 
-  // Add a soft hand shadow cast to the bottom-right (light source from top-left)
+  // A soft shadow under the hand, lit from the top-left. Offsets are in the
+  // sprite's own coordinate space, so they scale with it.
   ctx.shadowColor = 'rgba(0, 0, 0, 0.2)';
   ctx.shadowBlur = 45;
-  // Offset to the right (12px) and slightly down (8px) in coordinate space
   ctx.shadowOffsetX = 40;
   ctx.shadowOffsetY = 14;
 

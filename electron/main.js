@@ -1,5 +1,5 @@
 /**
- * Electron main process: window, IPC, filesystem and the Python sidecar.
+ * Electron main process: window, IPC and filesystem.
  *
  * The renderer owns the engine; main owns everything the renderer is not
  * allowed to touch. Keeping the split here means the preview canvas and the
@@ -20,7 +20,6 @@ import { fileURLToPath } from 'node:url';
 
 import { normalizeProject, projectFrames } from '../src/engine/model/project.js';
 import { HAND_STYLE_IDS } from '../src/engine/hand/styles.js';
-import { Sidecar } from '../src/engine/sidecar/client.js';
 import { prepareProject, prepareHand } from './prepare.js';
 import { bundledFontPath, listFonts } from './fonts.js';
 import { describeFile, hasFfmpeg, AUDIO_EXT, IMAGE_EXT } from './media.js';
@@ -32,8 +31,6 @@ const DEV_URL = process.env.VITE_DEV_SERVER_URL;
 // laid out at a scale no real display uses. Pin it, and only for the test.
 if (process.env.WB_SMOKE) app.commandLine.appendSwitch('force-device-scale-factor', '1');
 
-let sidecar = null;
-const getSidecar = () => (sidecar ??= new Sidecar({ root: ROOT, cacheDir: join(ROOT, '.cache') }));
 
 /** Shipped sample projects. Read by both the File menu and `project:examples`. */
 const EXAMPLES = [
@@ -428,7 +425,7 @@ async function runSmoke(win, outPath) {
   if (!process.env.WB_SMOKE_NO_OPEN) {
     ok = await win.webContents.executeJavaScript(
       `window.__studioSmoke(${JSON.stringify(example)}).catch(e => 'ERR: ' + (e && e.message || e))`);
-    if (typeof ok === 'string') { console.log('smoke FAILED:', ok); sidecar?.stop(); app.exit(1); return; }
+    if (typeof ok === 'string') { console.log('smoke FAILED:', ok); app.exit(1); return; }
   }
   // WB_SMOKE_SCRIPT runs an interaction script in the renderer before the
   // screenshot, so UI behaviour can be checked headlessly rather than assumed.
@@ -437,7 +434,7 @@ async function runSmoke(win, outPath) {
     const out = await win.webContents.executeJavaScript(
       `(async () => { ${src} })().catch((e) => 'ERR: ' + (e && e.stack || e))`);
     console.log('[script]', typeof out === 'string' ? out : JSON.stringify(out));
-    if (typeof out === 'string' && out.startsWith('ERR')) { sidecar?.stop(); app.exit(1); return; }
+    if (typeof out === 'string' && out.startsWith('ERR')) { app.exit(1); return; }
   }
 
   console.log('[smoke]', await win.webContents.executeJavaScript(
@@ -455,7 +452,6 @@ async function runSmoke(win, outPath) {
   // back whatever it last drew. Trust the script's DOM assertions above it.
   console.log(ok ? `smoke ok -> ${outPath} (screenshot best-effort)`
                  : 'smoke FAILED: renderer reported no frame');
-  sidecar?.stop();
   app.exit(ok ? 0 : 1);
 }
 
@@ -469,7 +465,5 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
-  sidecar?.stop();
   if (process.platform !== 'darwin') app.quit();
 });
-app.on('before-quit', () => sidecar?.stop());

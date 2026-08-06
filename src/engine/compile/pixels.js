@@ -22,7 +22,7 @@
  *   - the **mask** grid (`MASK_MAX_DIM`) is what coverage is judged on, so it
  *     is fine;
  *   - the **shape** grid (`SHAPE_MAX_DIM`) is what the pen's path and the
- *     pencil stencil are built from, so it is coarse -- scribbling a boundary
+ *     centreline are built from, so it is coarse -- scribbling a boundary
  *     traced at full resolution costs a great deal and looks no different, and
  *     the mask is what guarantees the result either way.
  *
@@ -35,7 +35,7 @@
 /** Longest edge of the grid coverage is judged on. */
 export const MASK_MAX_DIM = 1400;
 
-/** Longest edge of the grid pen paths and the stencil are traced from. */
+/** Longest edge of the grid pen paths are traced from. */
 export const SHAPE_MAX_DIM = 512;
 
 /** Default number of colour groups. */
@@ -98,11 +98,12 @@ export const DEFAULT_INK_CHROMA = 0.14;
  * Below this alpha a pixel is treated as absent rather than as a colour.
  *
  * One, not a comfortable threshold like 8: a pixel with *any* alpha is part of
- * the picture and has to end up owned by some group, because the coverage mask
- * is also what rubs the pencil stencil out. Leave a fringe of alpha-3 pixels
- * unowned and the mask never covers them, the pencil drawn over them survives
- * to the last frame, and the finished picture is not the source image. They are
- * nearly invisible either way; what matters is that nothing is unowned.
+ * the picture and has to end up owned by some group, because a group's mask is
+ * the only thing that ever reveals it. Leave a fringe of alpha-3 pixels unowned
+ * and no mask covers them, so they never appear and the finished frame is not
+ * the source image -- which is the one guarantee this pipeline exists to make.
+ * They are nearly invisible either way; what matters is that nothing is
+ * unowned.
  */
 const ALPHA_FLOOR = 1;
 
@@ -110,7 +111,7 @@ const ALPHA_FLOOR = 1;
  * Smallest ring, in shape-grid pixels squared, that is worth giving to the pen.
  *
  * The one place anything is discarded, and it costs nothing: `rings` only
- * decides *where the nib travels and what the pencil sketches*, while coverage
+ * decides *where the nib travels*, while coverage
  * comes from `rects`, which is complete. An antialiased edge quantises into a
  * confetti of single-pixel islands -- a 1600px icon produced 4400 rings, nearly
  * all of them four points around one pixel -- and scribbling those would cost a
@@ -151,7 +152,6 @@ const MAX_DRAWN_PIECES = 256;
  * toward whatever the transparent pixels happen to hold.
  *
  * @param {{width:number, height:number, data:Uint8ClampedArray}} src
- * @param {number} maxDim
  * @returns {{width:number, height:number, data:Uint8ClampedArray}}
  */
 export function resample(src, maxDim) {
@@ -813,7 +813,7 @@ export function analyzeArtwork(img, opts = {}) {
         return o;
       })
       // Outer rings first: `scribbleRegion` uses the even-odd rule, which does
-      // not care about order, but a stencil drawn outside-in reads better.
+      // not care about order, but drawing outside-in reads better.
       .sort((a, b) => ringArea(b) - ringArea(a));
 
     let x0 = Infinity; let y0 = Infinity; let x1 = -Infinity; let y1 = -Infinity;

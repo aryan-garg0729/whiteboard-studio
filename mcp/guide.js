@@ -112,8 +112,8 @@ only reads from its own workspace.
 
 ## The workflow that works
 
-1. \`list_capabilities\` once, to see what exists and whether ffmpeg and the
-   Python sidecar are installed.
+1. \`list_capabilities\` once, to see what exists and whether ffmpeg is
+   installed.
 2. \`create_project\`.
 3. \`storyboard\` with the whole script as beats. One call, a complete draft.
 4. \`render_contact_sheet\` — the entire video as one image. Look at pacing and

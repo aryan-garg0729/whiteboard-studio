@@ -56,15 +56,6 @@ export function flattenCubic(out, x0, y0, x1, y1, x2, y2, x3, y3, eps) {
   }
 }
 
-/** Append a flattened quadratic by degree-elevating to a cubic. */
-export function flattenQuadratic(out, x0, y0, cx, cy, x1, y1, eps) {
-  flattenCubic(out,
-    x0, y0,
-    x0 + (2 / 3) * (cx - x0), y0 + (2 / 3) * (cy - y0),
-    x1 + (2 / 3) * (cx - x1), y1 + (2 / 3) * (cy - y1),
-    x1, y1, eps);
-}
-
 /**
  * Cumulative arc length per vertex. Computed once at compile time; the runtime
  * never recomputes it.

@@ -129,3 +129,32 @@ export function paintRects(ctx, closure, color = '#ffffff') {
     }
   }
 }
+
+/**
+ * How much wider than its nominal width a mask stroke actually covers.
+ *
+ * Spilling costs nothing -- the mask only ever uncovers artwork, and past the
+ * edge of a shape there is nothing to uncover -- while a brush exactly its own
+ * width leaves visible lattice gaps between passes at the moment they are laid
+ * down, which the closure then has to fix all at once.
+ */
+export const PAINT_GAIN = 1.12;
+
+/**
+ * The bounds of everything a pixel-planned animation reveals.
+ *
+ * What the eraser sweeps, so it has to cover the whole picture rather than the
+ * part drawn so far. A fully transparent image has no groups and therefore no
+ * ink; erase must see a degenerate box and decline, rather than sweeping empty
+ * paper.
+ */
+export function artworkInkBbox(analysis) {
+  let x0 = Infinity; let y0 = Infinity; let x1 = -Infinity; let y1 = -Infinity;
+  for (const g of analysis.groups) {
+    if (g.bbox[0] < x0) x0 = g.bbox[0];
+    if (g.bbox[1] < y0) y0 = g.bbox[1];
+    if (g.bbox[2] > x1) x1 = g.bbox[2];
+    if (g.bbox[3] > y1) y1 = g.bbox[3];
+  }
+  return Number.isFinite(x0) ? [x0, y0, x1, y1] : [0, 0, 0, 0];
+}

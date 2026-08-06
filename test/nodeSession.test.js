@@ -79,9 +79,9 @@ test('compileClip measures a clip on its own, which is what placement needs', as
 });
 
 test('a missing image file fails at compile, naming the file', async () => {
-  // It used to fail earlier and for a different reason -- images needed the
-  // Python sidecar to be traced. Nothing needs Python to draw any more, so the
-  // only way an image clip fails is that its file is not there.
+  // It used to fail earlier and for a different reason -- images needed a
+  // Python sidecar to trace them. Nothing needs Python now, so the only way an
+  // image clip fails is that its file is not there.
   await assert.rejects(
     () => compileClip(
       { id: 'c', assetId: 'a', animId: 'draw.stencilPaint', transform: { scale: 1 }, params: {} },

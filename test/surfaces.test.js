@@ -3,11 +3,9 @@ import assert from 'node:assert/strict';
 import { createCanvas } from '@napi-rs/canvas';
 
 import { setSurfaceFactory, Layer, ClipSurfaces } from '../src/engine/render/surfaces.js';
+import { useTestSurfaces } from './helpers/surface.js';
 
-setSurfaceFactory((w, h) => {
-  const canvas = createCanvas(w, h);
-  return { canvas, ctx: canvas.getContext('2d') };
-});
+useTestSurfaces();
 
 /** Count non-transparent pixels on a surface. */
 function inked(surface, w, h) {
@@ -41,12 +39,12 @@ test('reset clears the active layer, not just the committed one', () => {
 
 test('resetAll leaves no layer holding stale ink', () => {
   const sf = new ClipSurfaces(64, 64, 0, 0);
-  for (const l of [sf.ink, sf.fill, sf.erase]) {
+  for (const l of [sf.fill, sf.erase]) {
     paint(l.committed.ctx);
     paint(l.active.ctx);
   }
   sf.resetAll();
-  for (const [name, l] of [['ink', sf.ink], ['fill', sf.fill], ['erase', sf.erase]]) {
+  for (const [name, l] of [['fill', sf.fill], ['erase', sf.erase]]) {
     assert.equal(inked(l.committed, 64, 64), 0, `${name}.committed`);
     assert.equal(inked(l.active, 64, 64), 0, `${name}.active`);
   }

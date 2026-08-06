@@ -45,7 +45,7 @@ const projectDir = dirname(projectPath);
 const rel = (p) => (isAbsolute(p) ? p : resolve(projectDir, p));
 
 async function main() {
-  // No sidecar: nothing on this path needs Python any more.
+  // Nothing on any path needs Python.
   const { session, project, frames } = await buildNodeSession(
     JSON.parse(readFileSync(projectPath, 'utf8')),
     {

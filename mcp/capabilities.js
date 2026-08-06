@@ -61,23 +61,12 @@ export function fonts() {
  * Everything an agent needs before its first edit, plus whether the two
  * optional dependencies are actually present.
  *
- * The environment check is not decoration. Text and SVG compile in pure JS, but
- * tracing a photograph needs the Python venv and exporting needs ffmpeg, and
- * both fail late and confusingly when missing. Asking up front turns "the
- * export tool returned an error" into "this machine has no ffmpeg".
+ * The environment check is not decoration. Everything compiles in pure JS, but
+ * *exporting* needs ffmpeg, and that fails late and confusingly when missing.
+ * Asking up front turns "the export tool returned an error" into "this machine
+ * has no ffmpeg".
  */
-export async function capabilities(sidecar) {
-  let sidecarStatus;
-  try {
-    const pong = await sidecar.ping();
-    sidecarStatus = { available: true, ...pong };
-  } catch (e) {
-    sidecarStatus = {
-      available: false,
-      reason: `${e.message}`.slice(0, 400),
-      hint: 'run `npm run sidecar:install`; text and SVG clips work without it',
-    };
-  }
+export function capabilities() {
   return {
     animations: animations(),
     fonts: fonts(),
@@ -89,7 +78,6 @@ export async function capabilities(sidecar) {
     defaults: DEFAULTS,
     environment: {
       ffmpeg: hasFfmpeg(),
-      sidecar: sidecarStatus,
     },
   };
 }

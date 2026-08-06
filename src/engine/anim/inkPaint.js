@@ -2,9 +2,8 @@
  * Whiteboard artwork: ink the black outline, then colour the shapes.
  *
  * `draw.stencilPaint` draws any picture at all and therefore assumes nothing
- * about it: it cuts the colours into a fixed number of boxes, sketches the
- * boundaries between them in grey pencil, and then paints. This one assumes a
- * great deal -- that the artwork was drawn the way a whiteboard illustration is
+ * about it: it cuts the colours into a fixed number of boxes and paints across
+ * them. This one assumes a great deal -- that the artwork was drawn the way a whiteboard illustration is
  * drawn, shapes outlined in black and filled flat -- and gets three things back
  * for it that the general animation cannot have.
  *
@@ -19,9 +18,7 @@
  *     the picture at once.
  *
  * Both passes lay a white mask into `sf.fill` and `composite()` shows the
- * artwork through it, so nothing is ever drawn in a stand-in colour and
- * `clearInkUnderFill` has nothing to do -- there is no `sf.ink` layer in play at
- * all. `settles: false`, because what is on screen is already the artwork.
+ * artwork through it, so nothing is ever drawn in a stand-in colour.
  *
  * The exactness guarantee is the same one `stencilPaint` makes and is inherited
  * whole: every pixel is owned by some stroke's closure, the closures are blitted
@@ -33,51 +30,23 @@ import { locate, makePhase, tangentAt } from '../compile/geometry.js';
 import { analyzeArtwork } from '../compile/pixels.js';
 import { buildInkPasses } from '../compile/inkPasses.js';
 import {
-  applyBrush, easeEnds, paintRects, strokePartial, strokeWhole,
+  applyBrush, artworkInkBbox, easeEnds, PAINT_GAIN, paintRects, strokePartial, strokeWhole,
 } from './penStrokes.js';
 import { register } from './registry.js';
 
 /**
  * Fraction of the clip spent inking the outline.
  *
- * Higher than `stencilPaint`'s stencil share, because here the outline is not a
- * preliminary sketch that gets covered up -- it is half the finished drawing,
- * and it is the half that reads as drawing.
+ * Close to half, because the outline *is* half the finished drawing and it is
+ * the half that reads as drawing -- a viewer sees the picture appear when the
+ * linework lands, and the colour that follows confirms it rather than revealing
+ * it. Much below a third and the inking looks hurried against a long slow fill.
  */
 export const DEFAULT_OUTLINE_SHARE = 0.45;
-
-/**
- * How much wider than its nominal width a stroke actually masks.
- *
- * Spilling costs nothing: the mask only uncovers artwork, and past the edge of
- * a shape there is nothing to uncover. A brush exactly its own width leaves
- * visible lattice gaps between passes at the moment they are laid down.
- */
-const PAINT_GAIN = 1.12;
-
-/** The bounds of everything this plan reveals -- what the eraser sweeps. */
-function inkBboxOf(analysis) {
-  let x0 = Infinity; let y0 = Infinity; let x1 = -Infinity; let y1 = -Infinity;
-  for (const g of analysis.groups) {
-    if (g.bbox[0] < x0) x0 = g.bbox[0];
-    if (g.bbox[1] < y0) y0 = g.bbox[1];
-    if (g.bbox[2] > x1) x1 = g.bbox[2];
-    if (g.bbox[3] > y1) y1 = g.bbox[3];
-  }
-  // A fully transparent image has no groups and therefore no ink; erase must
-  // see a degenerate box and decline, rather than sweeping empty paper.
-  return Number.isFinite(x0) ? [x0, y0, x1, y1] : [0, 0, 0, 0];
-}
 
 export const inkPaint = register({
   id: 'draw.inkPaint',
   label: 'Ink outline, then colour',
-
-  // The artwork is on screen from the first stroke, so there is no surrogate to
-  // fade away. Compositing the image over itself would not be the no-op it
-  // looks like: source-over of an image onto itself raises every partial alpha,
-  // and soft edges would visibly thicken.
-  settles: false,
 
   paramSchema: {
     colorTolerance: { type: 'number', min: 0, max: 60, step: 1,
@@ -134,7 +103,7 @@ export const inkPaint = register({
       penWidth: ink.length ? ink[0].width : (params.fillBrushWidth ?? 14),
       paintGain: PAINT_GAIN,
       bbox: [0, 0, analysis.width, analysis.height],
-      inkBbox: inkBboxOf(analysis),
+      inkBbox: artworkInkBbox(analysis),
       width: analysis.width,
       height: analysis.height,
     };

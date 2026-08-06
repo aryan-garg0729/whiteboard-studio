@@ -7,7 +7,11 @@
  * and no decoder involved.
  */
 
-import { createCanvas } from '@napi-rs/canvas';
+import { createCanvas, loadImage } from '@napi-rs/canvas';
+import { readdirSync } from 'node:fs';
+
+import { imagePixels } from '../../src/engine/render/rasterize.js';
+import { ClipSurfaces } from '../../src/engine/render/surfaces.js';
 
 /** Parse `#rrggbb` into a byte triple. */
 function rgb(hex) {
@@ -79,4 +83,46 @@ export function installArt(session, clipId, image) {
   ctx.putImageData(id, 0, 0);
   sf.ensureArt().ctx.drawImage(canvas, 0, 0);
   return sf;
+}
+
+/** Every bundled raster, which between them cover line art and cut-out alpha. */
+export const samples = () => [
+  new URL('../../assets/demo/lineart.png', import.meta.url),
+  ...readdirSync(new URL('../../assets/media/', import.meta.url))
+    .filter((f) => f.endsWith('.png'))
+    .map((f) => new URL(`../../assets/media/${f}`, import.meta.url)),
+];
+
+/** How many pixels differ, so a failure can say *how far* off it was. */
+export const countDiff = (a, b) => {
+  let n = 0;
+  for (let i = 0; i < a.length; i += 4) {
+    if (a[i] !== b[i] || a[i + 1] !== b[i + 1]
+      || a[i + 2] !== b[i + 2] || a[i + 3] !== b[i + 3]) n++;
+  }
+  return n;
+};
+
+/**
+ * Draw a clip all the way through and hand back the finished pixels beside the
+ * artwork as the engine holds it.
+ *
+ * The artwork surface is the honest comparison target, not the file on disk: a
+ * canvas stores premultiplied alpha, so a partially transparent source cannot
+ * survive a decode/read round trip byte for byte no matter what the animation
+ * does. What is being pinned is that the animation adds and removes nothing.
+ */
+export async function drawToEnd(anim, url, params = {}, steps = 90) {
+  const decoded = await loadImage(url);
+  const { width, height } = decoded;
+  const sf = new ClipSurfaces(width, height, 0, 0);
+  sf.ensureArt().ctx.drawImage(decoded, 0, 0);
+  const target = sf.art.ctx.getImageData(0, 0, width, height).data;
+
+  const plan = await anim.compile(
+    { id: 'a', image: imagePixels(decoded, width, height) }, params);
+  for (let i = 0; i <= steps; i++) anim.advance(sf, plan, i / steps);
+
+  const out = sf.composite().getContext('2d').getImageData(0, 0, width, height).data;
+  return { out, target, plan };
 }

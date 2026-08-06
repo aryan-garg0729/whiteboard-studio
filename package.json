@@ -3,9 +3,8 @@
   "version": "0.1.0",
   "main": "electron/main.js",
   "scripts": {
-    "test": "node --test test/",
+    "test": "node --test test/*.test.js",
     "calibrate:hands": "python3 scripts/calibrate_hands.py",
-    "sidecar:install": "python3 -m venv .venv && .venv/bin/pip install -r src/sidecar/requirements.txt",
     "demo": "node scripts/demo-reel.js",
     "demo:frames": "node scripts/demo-reel.js --frames-only",
     "animate:image": "node scripts/animate-image.js",

@@ -24,40 +24,15 @@
  * greyer outline just inside the real one. Artwork that wants its outline drawn
  * first is exactly what `draw.inkPaint` is for -- it inks the real line, at its
  * real thickness, and leaves it there.
- *
- * `settles: false`: what is on screen is already the artwork, so there is
- * nothing to crossfade to.
  */
 
 import { locate, makePhase, tangentAt } from '../compile/geometry.js';
 import { analyzeArtwork } from '../compile/pixels.js';
 import { buildPasses } from '../compile/paintPasses.js';
-import { applyBrush, easeEnds, paintRects, strokePartial, strokeWhole } from './penStrokes.js';
+import {
+  applyBrush, artworkInkBbox, easeEnds, PAINT_GAIN, paintRects, strokePartial, strokeWhole,
+} from './penStrokes.js';
 import { register } from './registry.js';
-
-/**
- * How much wider than its nominal width the paint brush actually masks.
- *
- * Spilling costs nothing -- the mask only ever uncovers the artwork, and past
- * the edge of the picture there is no artwork to uncover -- while a brush that
- * is exactly its own width leaves visible lattice gaps between passes at the
- * moment they are laid down, which the closure then has to fix all at once.
- */
-const PAINT_GAIN = 1.12;
-
-/** The bounds of everything this plan reveals -- what the eraser sweeps. */
-function inkBboxOf(analysis) {
-  let x0 = Infinity; let y0 = Infinity; let x1 = -Infinity; let y1 = -Infinity;
-  for (const g of analysis.groups) {
-    if (g.bbox[0] < x0) x0 = g.bbox[0];
-    if (g.bbox[1] < y0) y0 = g.bbox[1];
-    if (g.bbox[2] > x1) x1 = g.bbox[2];
-    if (g.bbox[3] > y1) y1 = g.bbox[3];
-  }
-  // A fully transparent image has no groups and therefore no ink; erase must
-  // see a degenerate box and decline, rather than sweeping empty paper.
-  return Number.isFinite(x0) ? [x0, y0, x1, y1] : [0, 0, 0, 0];
-}
 
 export const stencilPaint = register({
   // The id keeps the old name. It is written into every project file on disk
@@ -65,12 +40,6 @@ export const stencilPaint = register({
   // break those to no purpose, and an id is a key, not a description.
   id: 'draw.stencilPaint',
   label: 'Paint the artwork in',
-
-  // The artwork is the thing on screen from the first stroke, so there is no
-  // surrogate to fade away. Compositing the image over itself would not be the
-  // no-op it looks like: source-over of an image onto itself raises every
-  // partial alpha, and soft edges would visibly thicken.
-  settles: false,
 
   paramSchema: {
     mode: { type: 'enum', options: ['zigzag', 'colorGroups'],
@@ -99,8 +68,7 @@ export const stencilPaint = register({
     return {
       strokes,
       // One pass, so the outline phase is empty and the whole clip is `fill`.
-      // The pair is kept because it is the shape every other part of the engine
-      // reads -- `locate`, the eraser and the hand rig all expect both.
+      // The pair is kept because `locate` and the dev scripts read both.
       phases: {
         outline: makePhase(strokes, 0, 0, 'OUTLINE'),
         fill: makePhase(strokes, 0, strokes.length, 'FILL'),
@@ -110,7 +78,7 @@ export const stencilPaint = register({
       penWidth: params.fillBrushWidth ?? 14,
       paintGain: PAINT_GAIN,
       bbox: [0, 0, analysis.width, analysis.height],
-      inkBbox: inkBboxOf(analysis),
+      inkBbox: artworkInkBbox(analysis),
       width: analysis.width,
       height: analysis.height,
     };

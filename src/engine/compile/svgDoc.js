@@ -1,10 +1,11 @@
 /**
  * SVG document -> outline contours + fillable colour regions.
  *
- * Produces the same shape as the Python vectorizer, so an SVG import and a
- * raster import feed the animation pipeline identically. Vectors skip the
- * sidecar entirely: the geometry is already exact, so tracing it would only
- * throw information away.
+ * The geometry is used exactly as drawn -- nothing is traced or approximated,
+ * because an SVG already *is* the exact shape a tracer would be guessing at.
+ * What comes out is what `paintVectorArt` installs as a clip's artwork; the pen
+ * is planned against a raster of it, so a vector and a photograph draw the same
+ * way. See `render/rasterize.js`.
  *
  * Scope is the drawing subset that matters for whiteboard art: shapes, groups,
  * transforms, presentation attributes and inline `style`. Not supported (and

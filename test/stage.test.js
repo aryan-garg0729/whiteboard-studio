@@ -16,7 +16,6 @@ import {
 import { readFileSync } from 'node:fs';
 
 import { rotationFor, shaftAngle, solveHand } from '../src/engine/hand/rig.js';
-import { SETTLE_SECONDS, settleAt } from '../src/engine/render/renderFrame.js';
 
 const meta = { width: 1920, height: 1080 };
 const cam0 = { x: 0, y: 0, zoom: 1 };
@@ -162,25 +161,6 @@ test('rotation stays well inside the clamp the scale solve assumes', () => {
   }
   assert.ok(worst <= 25, `${worst} exceeds the clamp`);
   assert.ok(worst < 15, `expected a calm hand, got +/-${worst.toFixed(1)}deg`);
-});
-
-// ── settle ────────────────────────────────────────────────────────────
-
-test('settle starts only once the clip has finished drawing', () => {
-  const clip = { start: 1, duration: 2 };          // draws 1s .. 3s
-  assert.equal(settleAt(clip, 0), 0);
-  assert.equal(settleAt(clip, 2.9), 0, 'still drawing');
-  assert.equal(settleAt(clip, 3), 0, 'the instant it lands');
-  near(settleAt(clip, 3 + SETTLE_SECONDS / 2), 0.5, 1e-9);
-  assert.equal(settleAt(clip, 3 + SETTLE_SECONDS), 1);
-  assert.equal(settleAt(clip, 99), 1, 'and stays settled');
-});
-
-test('settle is a pure function of time, so seeking is exact', () => {
-  const clip = { start: 0.2, duration: 4.2 };
-  const t = 4.5;
-  assert.equal(settleAt(clip, t), settleAt(clip, t));
-  assert.ok(settleAt(clip, t) > settleAt(clip, t - 0.1));
 });
 
 // ── hand reach ────────────────────────────────────────────────────────

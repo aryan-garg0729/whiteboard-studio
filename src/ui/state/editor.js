@@ -12,9 +12,9 @@
  * reducer, history, and the structural-vs-timing bookkeeping.
  *
  * Edits are tagged `structural` when they change geometry -- new assets, new
- * text, a different font. Those need a main-process round trip to re-trace or
- * re-skeletonise. Timing and placement edits are pure renderFrame inputs and
- * repaint immediately, which is why dragging a clip on the timeline is smooth.
+ * text, a different font. Those need a main-process round trip to recompile.
+ * Timing and placement edits are pure renderFrame inputs and repaint
+ * immediately, which is why dragging a clip on the timeline is smooth.
  */
 
 import { useCallback, useMemo, useReducer } from 'react';
@@ -25,11 +25,9 @@ import { EMPTY_PROJECT, isStructural } from '../../engine/model/edits.js';
 // Re-exported so the app and the existing tests keep importing document
 // transforms from here; the move to the engine is not meant to be visible.
 export {
-  TIMING_FIELDS, EMPTY_PROJECT, EditError,
-  uniqueId, clipEnd, packTrack, afterTransition, authoredEnd,
+  EMPTY_PROJECT, uniqueId, packTrack,
   addClipTo, removeClipFrom, isStructural,
-  CAMERA_EPS, CAMERA_MOVE_SECONDS, withCameraAt,
-  placeInFrame, worldRect,
+  CAMERA_MOVE_SECONDS, withCameraAt,
 } from '../../engine/model/edits.js';
 
 const HISTORY_LIMIT = 100;
@@ -68,15 +66,15 @@ export function reducer(state, action) {
         rev: state.rev + 1,
         structuralRev,
         // Opening a project already returns prepared geometry, so re-preparing
-        // it would repeat every trace and skeletonisation for nothing -- and
-        // the progress overlay it puts up hides the stage while it does.
+        // it would recompile every clip for nothing -- and the progress overlay
+        // it puts up hides the stage while it does.
         preparedRev: action.prepared ? structuralRev : state.preparedRev,
         dirty: false,
       };
     }
 
     // Rebuild finished. Guarded by the revision it was started at: if the
-    // document moved on while the sidecar was working, it stays dirty.
+    // document moved on while the rebuild was running, it stays dirty.
     case 'prepared':
       return { ...state, preparedRev: Math.max(state.preparedRev, action.rev) };
 
@@ -88,7 +86,7 @@ export function reducer(state, action) {
       //
       // `replace` is the same idea for a follow-up the user never asked for:
       // it amends the document in place without a history entry. Placing a clip
-      // uses it -- the centring pass runs once the traced geometry arrives, and
+      // uses it -- the centring pass runs once the measurement arrives, and
       // without this an undo would leave the clip on the page and merely move
       // it, which reads as a bug rather than as an undo.
       const merge = action.replace || (action.coalesce && action.coalesce === state.tag);
@@ -120,8 +118,8 @@ export function reducer(state, action) {
         future: [state.doc, ...state.future],
         rev: state.rev + 1,
         // We cannot know whether the undone edit was structural, and a stale
-        // prepared payload renders the wrong artwork. Re-preparing is cheap
-        // (the sidecar caches by content hash) and always correct.
+        // prepared payload renders the wrong artwork. Re-preparing is always
+        // correct, and cheap enough not to be worth guessing about.
         structuralRev: state.structuralRev + 1,
         dirty: true,
       };

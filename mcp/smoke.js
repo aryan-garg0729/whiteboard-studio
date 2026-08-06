@@ -60,7 +60,7 @@ async function main() {
   assert.equal(caps.animations.length, 8);
   assert.equal(caps.fonts.length, 9);
   ok(`capabilities: ${caps.animations.length} animations, ${caps.fonts.length} fonts, `
-    + `ffmpeg=${caps.environment.ffmpeg}, sidecar=${caps.environment.sidecar.available}`);
+    + `ffmpeg=${caps.environment.ffmpeg}`);
 
   const created = data(await client.callTool({
     name: 'create_project',

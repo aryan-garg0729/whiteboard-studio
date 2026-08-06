@@ -27,7 +27,6 @@
 import { cameraAt, ensureSurfaces } from '../src/engine/render/renderFrame.js';
 import { normalizeProject, projectDuration, projectFrames } from '../src/engine/model/project.js';
 import { buildNodeSession, compileClip, installNodeSurfaces } from '../src/engine/host/nodeSession.js';
-import { Sidecar } from '../src/engine/sidecar/client.js';
 import * as edits from '../src/engine/model/edits.js';
 import { checkAnimForKind, checkParams, checkTransform } from './capabilities.js';
 import { ROOT, loadProject, readablePath, saveProject } from './workspace.js';
@@ -44,27 +43,7 @@ export class Studio {
   constructor({ root = ROOT } = {}) {
     this.root = root;
     this.open = new Map();
-    this._sidecar = null;
     installNodeSurfaces();
-  }
-
-  /**
-   * One sidecar for the life of the process.
-   *
-   * Startup is ~0.4s of interpreter plus numpy and cv2 imports -- fine once,
-   * intolerable per image. Created lazily so a session that only writes text
-   * and SVG never pays for Python at all, and never fails because it is absent.
-   */
-  sidecar() {
-    if (!this._sidecar) {
-      this._sidecar = new Sidecar({ root: this.root, cacheDir: `${this.root}/.cache` });
-    }
-    return this._sidecar;
-  }
-
-  stop() {
-    this._sidecar?.stop();
-    this._sidecar = null;
   }
 
   // ── documents ───────────────────────────────────────────────────────
@@ -116,7 +95,7 @@ export class Studio {
     e.history = e.history.slice(0, -1);
     e.rev++;
     // No record of whether the undone edit was structural, and a stale session
-    // renders the wrong artwork. Rebuilding is cheap -- the sidecar caches by
+    // renders the wrong artwork. Rebuilding is cheap -- compiling is
     // content hash -- and always correct.
     e.built = null;
     saveProject(name, e.doc);
@@ -173,11 +152,7 @@ export class Studio {
 
     if (!e.built) {
       e.built = {
-        ...await buildNodeSession(e.doc, {
-          root: this.root,
-          sidecar: this.sidecar(),
-          rel: readablePath,
-        }),
+        ...await buildNodeSession(e.doc, { root: this.root, rel: readablePath }),
         rev: e.rev,
       };
     }
@@ -215,7 +190,7 @@ export class Studio {
       const built = await compileClip(
         next.clips.find((c) => c.id === clip.id),
         next.assets[clip.assetId],
-        { root: this.root, sidecar: this.sidecar(), rel: readablePath });
+        { root: this.root, rel: readablePath });
       const page = next.pages.find((p) => p.id === clip.pageId) ?? next.pages[0];
       const cam = cameraAt(page, clip.start);
       // Vector artwork may be scaled up as well as down; see placeInFrame.

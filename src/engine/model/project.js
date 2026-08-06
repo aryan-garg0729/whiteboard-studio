@@ -79,12 +79,11 @@ const APPEAR = ['appear.instant', 'appear.fade', 'appear.pop', 'appear.slide'];
 /**
  * Which animations suit which asset kind.
  *
- * The scribble fill needs traced regions and the text animations need a font,
- * so the pairings are not interchangeable -- offering all of them everywhere
- * just invites a clip that renders nothing.
+ * The picture animations need decoded pixels and the text animations need a
+ * font, so the pairings are not interchangeable -- offering all of them
+ * everywhere just invites a clip that renders nothing.
  */
 export const ANIMATIONS_FOR_KIND = {
-  // The guided text trace is first because it is the default for new captions.
   // `inkPaint` first because it is the default: this tool is pointed at
   // whiteboard artwork, and inking the real outline reads as drawing in a way
   // a scribble sweep does not. `stencilPaint` is the fallback that assumes

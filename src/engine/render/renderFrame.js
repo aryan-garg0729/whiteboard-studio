@@ -86,20 +86,6 @@ export function cameraAt(page, t) {
   };
 }
 
-/**
- * How long the clip takes to swap the drawn surrogate for the source artwork,
- * in seconds. Short enough to read as the drawing "settling", long enough not
- * to pop. Kept as time (not frames) so it looks the same at any fps.
- */
-export const SETTLE_SECONDS = 0.35;
-
-/** Crossfade progress from the drawn look to the original artwork. */
-export function settleAt(clip, t) {
-  const end = clip.start + clip.duration;
-  if (t <= end) return 0;
-  return Math.min(1, (t - end) / SETTLE_SECONDS);
-}
-
 function surfacesFor(session, clip, plan) {
   let sf = session.surfaces.get(clip.id);
   if (!sf) {
@@ -209,13 +195,7 @@ export function renderPage(session, project, pageId, t, ctx, opts) {
       }
     }
 
-    // An animation that reveals the artwork itself has nothing to settle to,
-    // and asking for it anyway is not the no-op it looks like: `composite`
-    // would draw the revealed artwork over itself at `globalAlpha = settle`,
-    // and source-over of an image onto itself raises every partial alpha, so
-    // antialiased edges and soft greys thicken over the settle window.
-    const out = sf.composite(anim.settles === false ? 0 : settleAt(clip, t),
-      plan?.clearInkUnderFill === true);
+    const out = sf.composite();
 
     // world -> screen
     const tr = clip.transform || { x: 0, y: 0, scale: 1, rotation: 0 };
@@ -293,7 +273,6 @@ function pageSurfaces(session, width, height) {
  *
  * @param {RenderSession} session
  * @param {Object} project
- * @param {number} frameIndex
  * @param {any} ctx destination 2D context, sized {width, height}
  * @param {{width:number, height:number, showHand?:boolean, handStyleId?:string}} opts
  */

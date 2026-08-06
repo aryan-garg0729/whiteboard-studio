@@ -40,25 +40,6 @@ export const EDGE_MARGIN = 24;
 export const COMFORT_SCALE = 0.7;
 
 /**
- * Angle between the asset's nib->elbow vector and the outward normal of its
- * anchor edge, in radians. Assets are hand-drawn, so the limb is never exactly
- * perpendicular to the edge it exits through: hand1's V is (-80.7, 1920),
- * i.e. 2.4deg off straight-down.
- */
-export function assetTilt(style, source) {
-  if (!source.armExitPx) return 0;
-  const vx = source.armExitPx[0] - source.tipPx[0];
-  const vy = source.armExitPx[1] - source.tipPx[1];
-  switch (style.anchorEdge) {
-    case 'bottom': return Math.atan2(vx, vy);
-    case 'top': return Math.atan2(vx, -vy);
-    case 'right': return Math.atan2(vy, vx);
-    case 'left': return Math.atan2(vy, -vx);
-    default: return 0;
-  }
-}
-
-/**
  * Minimum uniform scale at which the limb is guaranteed to exit the frame for
  * *any* nib position in the frame.
  *

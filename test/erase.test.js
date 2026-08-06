@@ -5,11 +5,9 @@ import { createCanvas } from '@napi-rs/canvas';
 import { setSurfaceFactory, ClipSurfaces } from '../src/engine/render/surfaces.js';
 import { makeStroke } from '../src/engine/compile/geometry.js';
 import { compileErase, advanceErase, inkExtent } from '../src/engine/anim/erase.js';
+import { useTestSurfaces } from './helpers/surface.js';
 
-setSurfaceFactory((w, h) => {
-  const canvas = createCanvas(w, h);
-  return { canvas, ctx: canvas.getContext('2d') };
-});
+useTestSurfaces();
 
 const plan = {
   strokes: [

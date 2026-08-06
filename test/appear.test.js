@@ -9,11 +9,9 @@ import { getAnimation } from '../src/engine/anim/registry.js';
 import '../src/engine/anim/appear.js';
 import { hasInk, inkExtent, compileErase } from '../src/engine/anim/erase.js';
 import { installArt, squareImage } from './helpers/art.js';
+import { useTestSurfaces } from './helpers/surface.js';
 
-setSurfaceFactory((w, h) => {
-  const canvas = createCanvas(w, h);
-  return { canvas, ctx: canvas.getContext('2d') };
-});
+useTestSurfaces();
 
 const ring = (...xy) => Float64Array.from(xy);
 const rect = (x0, y0, x1, y1) => ring(x0, y0, x1, y0, x1, y1, x0, y1);
@@ -47,9 +45,9 @@ test('an entrance shows the whole artwork from its first frame', async () => {
     const sf = surfacesFor(plan);
 
     anim.advance(sf, plan, 0);
-    const first = opaque(sf.composite(0), sf.w, sf.h);
+    const first = opaque(sf.composite(), sf.w, sf.h);
     anim.advance(sf, plan, 1);
-    const last = opaque(sf.composite(0), sf.w, sf.h);
+    const last = opaque(sf.composite(), sf.w, sf.h);
 
     // The mask is complete throughout; a fade is opacity at blit time, not a
     // mask that grows -- otherwise the artwork would wipe on rather than fade.
@@ -127,7 +125,6 @@ test('the picture does not change once the clip ends', async () => {
   const mid = frame(15);
   const end = frame(30);
   assert.ok(!mid.equals(end), 'the fade must actually be visible mid-clip');
-  assert.equal(anim.settles, false);
   for (const n of [31, 40, 60]) {
     assert.ok(frame(n).equals(end), `frame ${n} changed after the clip ended`);
   }

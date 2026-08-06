@@ -14,18 +14,15 @@ import { createCanvas } from '@napi-rs/canvas';
 import { setSurfaceFactory } from '../src/engine/render/surfaces.js';
 import { createSession, renderFrame } from '../src/engine/render/renderFrame.js';
 import { normalizeProject, projectFrames } from '../src/engine/model/project.js';
-import { makeStroke } from '../src/engine/compile/geometry.js';
 import { prepareProject, prepareHand } from '../electron/prepare.js';
 import { HAND_STYLE_IDS, styleIdsFor } from '../src/engine/hand/styles.js';
 import stencilPaint from '../src/engine/anim/stencilPaint.js';
 import { vectorPixels } from '../src/engine/render/rasterize.js';
 import { compileErase } from '../src/engine/anim/erase.js';
 import { installArt } from './helpers/art.js';
+import { useTestSurfaces } from './helpers/surface.js';
 
-setSurfaceFactory((w, h) => {
-  const canvas = createCanvas(w, h);
-  return { canvas, ctx: canvas.getContext('2d') };
-});
+useTestSurfaces();
 
 const ROOT = new URL('..', import.meta.url).pathname;
 const svgProjectPath = `${ROOT}examples/svg.project.json`;

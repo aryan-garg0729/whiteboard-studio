@@ -104,9 +104,9 @@ server.registerTool('list_capabilities', {
   description:
     'Everything the studio can do: animation ids with their parameter schemas and the asset '
     + 'kinds each suits, bundled fonts, hand styles, page transitions, schema defaults, and '
-    + 'whether ffmpeg and the Python sidecar are installed. Call this once before authoring.',
+    + 'whether ffmpeg is installed. Call this once before authoring.',
   inputSchema: {},
-}, tool(async () => json(await capabilities(studio.sidecar()))));
+}, tool(async () => json(capabilities())));
 
 // ── lifecycle ─────────────────────────────────────────────────────────
 
@@ -423,7 +423,7 @@ server.registerTool('storyboard', {
     })).min(1),
   },
 }, tool(async ({ name, beats }) => {
-  const ctx = { root: ROOT, sidecar: studio.sidecar(), rel: readablePath };
+  const ctx = { root: ROOT, rel: readablePath };
   const { doc } = await storyboard({ doc: studio.doc(name), beats, ctx });
   studio.commit(name, () => doc, { structural: true });
   return after(name, { beats: beats.length });
@@ -568,7 +568,7 @@ server.registerPrompt('explainer', {
       text: `Make a whiteboard explainer about: ${topic}\n`
         + (seconds ? `Target length: about ${seconds} seconds.\n` : '')
         + `\nRead whiteboard://guide/authoring first. Then:\n`
-        + `1. list_capabilities, to check ffmpeg and the sidecar.\n`
+        + `1. list_capabilities, to check ffmpeg.\n`
         + `2. create_project.\n`
         + `3. Write the script as beats — a short caption each, and a simple SVG diagram `
         + `(write_svg) wherever a picture explains it better than words.\n`

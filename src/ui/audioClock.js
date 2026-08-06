@@ -48,13 +48,10 @@ function trackEnd(track, buffer) {
  *
  * @param {Object} o
  * @param {Array}  o.tracks   `doc.audio`
- * @param {number} o.fps
  * @param {number} o.frames   total frame count; playback stops at the last one
- * @param {boolean} o.playing
  * @param {number} o.frame    current frame; read when playback starts
  * @param {(n:number) => void} o.setFrame
  * @param {(p:boolean) => void} o.setPlaying
- * @param {boolean} [o.muted]
  * @param {number}  [o.volume] master gain, 0..1
  * @returns {{hasAudio:boolean}}
  */

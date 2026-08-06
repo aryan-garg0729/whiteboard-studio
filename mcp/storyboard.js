@@ -62,7 +62,7 @@ function placeInBand(bbox, meta, band, grow) {
  * @param {Object} o.doc document to build on (usually empty, but appending to
  *   an existing one is legal and lands after everything already authored)
  * @param {Array} o.beats `{text?, image?, svg?, seconds?, animId?, erase?, page?}`
- * @param {Object} o.ctx compile context for measuring: {root, sidecar, rel}
+ * @param {Object} o.ctx compile context for measuring: {root, rel}
  * @returns {Promise<{doc: Object, notes: string[]}>}
  */
 export async function storyboard({ doc, beats, ctx }) {

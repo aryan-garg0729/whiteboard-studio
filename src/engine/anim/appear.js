@@ -146,9 +146,6 @@ function registerAppear(spec) {
   return register({
     id: spec.id,
     label: spec.label,
-    // The artwork is what is on screen from the first frame; a crossfade to it
-    // would only composite it over itself and thicken every partial alpha.
-    settles: false,
     paramSchema: spec.paramSchema ?? {},
 
     async compile(asset) {
@@ -170,18 +167,18 @@ function registerAppear(spec) {
 const defaultsOf = (schema = {}) =>
   Object.fromEntries(Object.entries(schema).map(([k, v]) => [k, v.default]));
 
-export const appearInstant = registerAppear({
+registerAppear({
   id: 'appear.instant',
   label: 'Appear (instantly)',
 });
 
-export const appearFade = registerAppear({
+registerAppear({
   id: 'appear.fade',
   label: 'Appear (fade in)',
   present: (plan, u) => ({ alpha: ease(u) }),
 });
 
-export const appearPop = registerAppear({
+registerAppear({
   id: 'appear.pop',
   label: 'Appear (pop in)',
   paramSchema: {
@@ -194,7 +191,7 @@ export const appearPop = registerAppear({
   },
 });
 
-export const appearSlide = registerAppear({
+registerAppear({
   id: 'appear.slide',
   label: 'Appear (slide in)',
   paramSchema: {
@@ -218,11 +215,4 @@ export const appearSlide = registerAppear({
   },
 });
 
-/** Every entrance, for the hosts that need to know one when they see one. */
-export const APPEAR_IDS = [
-  'appear.instant', 'appear.fade', 'appear.pop', 'appear.slide',
-];
-
 export const isAppear = (animId) => String(animId ?? '').startsWith('appear.');
-
-export default appearInstant;

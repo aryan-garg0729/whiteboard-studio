@@ -30,9 +30,9 @@ import { getAnimation } from '../src/engine/anim/registry.js';
 import { imagePixels } from '../src/engine/render/rasterize.js';
 // Imported for their registration side effect; `getAnimation` only knows what
 // has been registered.
-import stencilPaint from '../src/engine/anim/stencilPaint.js';
+import '../src/engine/anim/stencilPaint.js';
 import '../src/engine/anim/inkPaint.js';
-import appear from '../src/engine/anim/appear.js';
+import '../src/engine/anim/appear.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 

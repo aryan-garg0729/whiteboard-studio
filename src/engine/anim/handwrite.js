@@ -46,7 +46,6 @@ function paintWipe(ctx, bbox, progress) {
 export const handwrite = register({
   id: 'draw.handwrite',
   label: 'Trace letterforms',
-  settles: false,
 
   paramSchema: {},
 

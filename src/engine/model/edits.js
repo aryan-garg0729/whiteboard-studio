@@ -186,11 +186,11 @@ export function afterTransition(doc, t) {
 /**
  * Append an asset plus a clip for it, starting after everything else ends.
  *
- * `clipId` may be supplied by the caller. That is not a convenience: the
- * editor cannot know a drawable's size until the sidecar has traced it, so
- * placing a clip in the centre of frame takes two steps, and the caller needs
- * a handle on the clip to finish the job when the geometry arrives. Picking
- * the id up front is the only way to get one out of a dispatch-based action.
+ * `clipId` may be supplied by the caller. That is not a convenience: a
+ * drawable's size is only known once its clip has been compiled, so placing one
+ * in the centre of frame takes two steps, and the caller needs a handle on the
+ * clip to finish the job when the measurement comes back. Picking the id up
+ * front is the only way to get one out of a dispatch-based action.
  */
 export function addClipTo(doc, asset, { animId, duration = 3, transform, clipId: wanted } = {}) {
   const assetId = uniqueId(asset.kind === 'text' ? 'text' : 'art',

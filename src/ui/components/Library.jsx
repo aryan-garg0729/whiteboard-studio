@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Field, Group, Icon, Num, PATH, Soon } from './common.jsx';
+import { Field, Icon, Num, PATH } from './common.jsx';
 import { FontList } from './FontPicker.jsx';
 
 const TABS = [

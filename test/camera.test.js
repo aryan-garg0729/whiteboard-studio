@@ -20,11 +20,9 @@ import { withCameraAt, CAMERA_MOVE_SECONDS } from '../src/ui/state/editor.js';
 import { flattenPath } from '../src/engine/compile/svgPath.js';
 import stencilPaint from '../src/engine/anim/stencilPaint.js';
 import { installArt, twoToneImage } from './helpers/art.js';
+import { useTestSurfaces } from './helpers/surface.js';
 
-setSurfaceFactory((w, h) => {
-  const canvas = createCanvas(w, h);
-  return { canvas, ctx: canvas.getContext('2d') };
-});
+useTestSurfaces();
 
 const near = (a, b, eps = 1e-9) => assert.ok(Math.abs(a - b) < eps, `${a} !== ${b}`);
 

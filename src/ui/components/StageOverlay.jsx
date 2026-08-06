@@ -10,7 +10,7 @@
 
 import React, { useCallback, useEffect, useRef } from 'react';
 import {
-  CORNERS, clipRect, hitTest, resizeTransform, screenToWorld, worldPerPixel,
+  CORNERS, hitTest, resizeTransform, screenToWorld, worldPerPixel,
 } from '../stageGeom.js';
 
 /** Zoom the wheel may reach directly. Beyond this, type it in the inspector. */

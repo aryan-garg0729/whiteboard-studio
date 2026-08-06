@@ -15,14 +15,11 @@ import { createCanvas } from '@napi-rs/canvas';
 import { setSurfaceFactory } from '../src/engine/render/surfaces.js';
 import { createSession, ensureSurfaces, renderFrame } from '../src/engine/render/renderFrame.js';
 import { normalizeProject, pageStateAt, pageWindows } from '../src/engine/model/project.js';
-import { flattenPath } from '../src/engine/compile/svgPath.js';
 import stencilPaint from '../src/engine/anim/stencilPaint.js';
 import { installArt, squareImage } from './helpers/art.js';
+import { useTestSurfaces } from './helpers/surface.js';
 
-setSurfaceFactory((w, h) => {
-  const canvas = createCanvas(w, h);
-  return { canvas, ctx: canvas.getContext('2d') };
-});
+useTestSurfaces();
 
 const W = 640;
 const H = 200;

@@ -85,9 +85,9 @@ export default function App() {
    * end up centred on.
    *
    * Centring cannot be done at add time: a drawable's bounding box only exists
-   * once the sidecar has traced an image or text layout has measured glyphs. So the
-   * clip lands at the centre point immediately -- on screen, which is the
-   * actual complaint -- and is centred exactly when the geometry arrives.
+   * once the clip has been compiled. So the clip lands at the centre point
+   * immediately -- on screen, which is the actual complaint -- and is centred
+   * exactly when the measurement arrives.
    */
   const pendingPlaceRef = useRef(new Map());
   /** Latest command table, for the application-menu listener. */
@@ -224,7 +224,7 @@ export default function App() {
   useEffect(() => {
     if (!window.studio || !ed.needsPrepare) return undefined;
     // Debounced: typing in the text field bumps structuralRev per keystroke,
-    // and every rebuild spawns sidecar work.
+    // and every rebuild recompiles every clip.
     const rev = ed.structuralRev;
     const id = setTimeout(() => { rebuild(ed.doc, ed.path, rev); }, 260);
     return () => clearTimeout(id);

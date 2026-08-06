@@ -25,8 +25,6 @@ import { newSurface } from './surfaces.js';
 
 /**
  * @param {any} drawable anything the host's canvas can `drawImage`
- * @param {number} width
- * @param {number} height
  * @returns {{width:number, height:number, data:Uint8ClampedArray}}
  */
 export function imagePixels(drawable, width, height) {
