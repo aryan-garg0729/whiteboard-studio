@@ -19,6 +19,12 @@ contextBridge.exposeInMainWorld('studio', {
   ingestFiles: (files) => ipcRenderer.invoke('asset:ingest', files),
   // Bytes for the preview mixer to decode; the renderer has no file access.
   readAudio: (path) => ipcRenderer.invoke('audio:read', path),
+  transcribe: (src) => ipcRenderer.invoke('subtitles:transcribe', { src }),
+  onTranscribeProgress: (fn) => {
+    const wrapped = (_e, p) => fn(p);
+    ipcRenderer.on('subtitles:progress', wrapped);
+    return () => ipcRenderer.removeListener('subtitles:progress', wrapped);
+  },
   listFonts: () => ipcRenderer.invoke('fonts:list'),
   // Bytes of a bundled face, so the picker can preview each name in its own
   // type. Only faces in assets/fonts are readable; see the handler in main.

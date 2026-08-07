@@ -24,6 +24,32 @@ const ANIMATION_LABELS = {
 };
 
 /**
+ * Controls for a `{key: spec}` schema, whatever declared it.
+ *
+ * Split out from `AnimParams` so the subtitle panel drives the same three
+ * controls off its own schema instead of growing a second copy of them.
+ */
+function SchemaFields({ schema, value, onSet }) {
+  return Object.entries(schema || {}).map(([key, spec]) => (
+    <Field key={key} label={spec.label || key}>
+      {spec.type === 'enum' ? (
+        <select value={value(key, spec)} onChange={(e) => onSet(key, e.target.value)}>
+          {spec.options.map((o) => (
+            <option key={o.value ?? o} value={o.value ?? o}>{o.label ?? o}</option>
+          ))}
+        </select>
+      ) : spec.type === 'color' ? (
+        <input type="color" value={value(key, spec)}
+               onChange={(e) => onSet(key, e.target.value)} />
+      ) : (
+        <Num value={value(key, spec)} min={spec.min} max={spec.max} step={spec.step}
+             onChange={(v) => onSet(key, v)} />
+      )}
+    </Field>
+  ));
+}
+
+/**
  * The selected animation's own settings.
  *
  * Every animation has always declared a `paramSchema` and nothing ever rendered
@@ -39,28 +65,15 @@ function AnimParams({ ed, clip }) {
   } catch {
     return null;                    // an id this build does not know: say nothing
   }
-  const entries = Object.entries(schema || {});
-  if (!entries.length) return null;
+  if (!Object.keys(schema || {}).length) return null;
 
-  const set = (key, value) =>
-    ed.patchClip(clip.id, { params: { ...(clip.params || {}), [key]: value } });
-  const valueOf = (key, spec) => clip.params?.[key] ?? spec.default;
-
-  return entries.map(([key, spec]) => (
-    <Field key={key} label={spec.label || key}>
-      {spec.type === 'enum' ? (
-        <select value={valueOf(key, spec)} onChange={(e) => set(key, e.target.value)}>
-          {spec.options.map((o) => <option key={o} value={o}>{o}</option>)}
-        </select>
-      ) : spec.type === 'color' ? (
-        <input type="color" value={valueOf(key, spec)}
-               onChange={(e) => set(key, e.target.value)} />
-      ) : (
-        <Num value={valueOf(key, spec)} min={spec.min} max={spec.max} step={spec.step}
-             onChange={(v) => set(key, v)} />
-      )}
-    </Field>
-  ));
+  return (
+    <SchemaFields
+      schema={schema}
+      value={(key, spec) => clip.params?.[key] ?? spec.default}
+      onSet={(key, v) => ed.patchClip(clip.id, { params: { ...(clip.params || {}), [key]: v } })}
+    />
+  );
 }
 
 const TRANSITION_LABELS = [
@@ -449,7 +462,71 @@ function PagesGroup({ ed, frame, fps }) {
   );
 }
 
-function ProjectInspector({ ed, hands, frame, fps, selection, bboxes }) {
+/**
+ * How the narration's words are drawn. Declared as a schema so the same three
+ * controls that render an animation's parameters render these too.
+ */
+const SUBTITLE_SCHEMA = {
+  style: { label: 'Style', type: 'enum', default: 'karaoke', options: [
+    { value: 'bar', label: 'Whole line' },
+    { value: 'karaoke', label: 'Highlight each word' },
+    { value: 'pop', label: 'One word at a time' },
+  ] },
+  fontSize: { label: 'Size', type: 'number', default: 56, min: 8, max: 400, step: 2 },
+  color: { label: 'Text', type: 'color', default: '#ffffff' },
+  highlight: { label: 'Spoken', type: 'color', default: '#ffd54a' },
+  maxWords: { label: 'Words per line', type: 'number', default: 7, min: 1, max: 40, step: 1 },
+  marginBottom: { label: 'From bottom', type: 'number', default: 0.08,
+    min: 0, max: 0.9, step: 0.01 },
+};
+
+/**
+ * The subtitle track: one per project, so it lives with the project rather than
+ * with a selection.
+ *
+ * The transcript is the only thing in the document a person cannot author by
+ * hand -- the timings are the whole value and only the recogniser knows them --
+ * so the panel is mostly one button, and the settings only appear once there is
+ * something to style.
+ */
+function SubtitlesGroup({ ed, transcribe, job }) {
+  const subs = ed.doc.subtitles;
+  const words = subs?.words?.length ?? 0;
+
+  return (
+    <Group title="Subtitles">
+      <div className="hint">
+        The narration&apos;s own words, burned over the whole video. Not the same as a
+        text clip the hand writes.
+      </div>
+      <button className="btn wide" disabled={!!job && !job.error} onClick={transcribe}>
+        <Icon d={PATH.audio} />
+        {job && !job.error ? `Transcribing… ${job.percent}%`
+          : words ? 'Transcribe again' : 'Transcribe narration'}
+      </button>
+      {job?.error && <div className="hint warn">{job.error}</div>}
+      {words > 0 && (
+        <>
+          <Field label="Show">
+            <input type="checkbox" checked={subs.enabled !== false}
+                   onChange={(e) => ed.setSubtitles({ enabled: e.target.checked })} />
+          </Field>
+          <SchemaFields
+            schema={SUBTITLE_SCHEMA}
+            value={(key, spec) => subs[key] ?? spec.default}
+            onSet={(key, v) => ed.setSubtitles({ [key]: v })}
+          />
+          <div className="hint">{words} words transcribed.</div>
+          <button className="btn wide" onClick={() => ed.removeSubtitles()}>
+            Remove subtitles
+          </button>
+        </>
+      )}
+    </Group>
+  );
+}
+
+function ProjectInspector({ ed, hands, frame, fps, selection, bboxes, transcribe, transcribing }) {
   const m = ed.doc.meta;
   return (
     <>
@@ -481,11 +558,14 @@ function ProjectInspector({ ed, hands, frame, fps, selection, bboxes }) {
                    bboxes={bboxes} />
 
       <PagesGroup ed={ed} frame={frame} fps={fps} />
+
+      <SubtitlesGroup ed={ed} transcribe={transcribe} job={transcribing} />
     </>
   );
 }
 
-export default function Inspector({ ed, selection, hands, fonts, frame, fps, bboxes }) {
+export default function Inspector({ ed, selection, hands, fonts, frame, fps, bboxes,
+  transcribe, transcribing }) {
   const clip = selection?.type === 'clip'
     ? ed.doc.clips.find((c) => c.id === selection.id)
     : null;
@@ -511,7 +591,8 @@ export default function Inspector({ ed, selection, hands, fonts, frame, fps, bbo
           {key && <CameraInspector ed={ed} pageId={key.pageId} index={key.index} />}
           {!clip && !track && !brk && !key
             && <ProjectInspector ed={ed} hands={hands} frame={frame} fps={fps}
-                                 selection={selection} bboxes={bboxes} />}
+                                 selection={selection} bboxes={bboxes}
+                                 transcribe={transcribe} transcribing={transcribing} />}
         </div>
       </div>
     </aside>

@@ -20,7 +20,9 @@ import { fileURLToPath } from 'node:url';
 
 import { normalizeProject, projectFrames } from '../src/engine/model/project.js';
 import { HAND_STYLE_IDS } from '../src/engine/hand/styles.js';
-import { prepareProject, prepareHand } from './prepare.js';
+import { transcribe } from '../src/engine/transcribe/whisper.js';
+import { toSrt } from '../src/engine/export/srt.js';
+import { prepareProject, prepareHand, prepareSubtitleFont } from './prepare.js';
 import { bundledFontPath, listFonts } from './fonts.js';
 import { describeFile, hasFfmpeg, AUDIO_EXT, IMAGE_EXT } from './media.js';
 
@@ -114,6 +116,7 @@ function buildMenu() {
         item('Image or SVG…', 'insert:image'),
         item('Text', 'insert:text'),
         item('Audio track…', 'insert:audio'),
+        item('Subtitles from narration…', 'insert:subtitles'),
         { type: 'separator' },
         item('Page break', 'insert:page'),
         item('Camera keyframe', 'insert:camera'),
@@ -178,6 +181,9 @@ async function prepare(raw, basePath) {
     project,
     prepared,
     hand: prepareHand(ROOT, project.meta.handStyleId),
+    // Sits beside `prepared` rather than inside it: that map is keyed by clip id
+    // and the renderer indexes it with one.
+    subtitleFont: prepareSubtitleFont(project, ROOT),
     frames: projectFrames(project),
   };
 }
@@ -302,6 +308,24 @@ ipcMain.handle('audio:read', (_e, path) => {
   }
 });
 
+/**
+ * Transcribe the narration into word timings.
+ *
+ * Held open for the whole run rather than handed back as a job id: unlike the
+ * MCP server there is a window on the other end that can show a progress bar,
+ * and one awaited call is simpler than a registry the renderer has to poll.
+ */
+ipcMain.handle('subtitles:transcribe', async (e, { src }) => {
+  try {
+    const words = await transcribe(src, {
+      onProgress: (p) => e.sender.send('subtitles:progress', p),
+    });
+    return { words };
+  } catch (err) {
+    return asError(err);
+  }
+});
+
 ipcMain.handle('fonts:list', () => {
   try { return listFonts(); } catch { return []; }
 });
@@ -372,9 +396,21 @@ ipcMain.handle('export:start', async (e, { project, out }) => {
     });
     child.stderr.on('data', (b) => { tail += b.toString(); });
     child.on('close', (code) => {
-      done(code === 0
-        ? { path: target }
-        : { error: tail.trim().split('\n').slice(-8).join('\n') || `exited ${code}` });
+      if (code !== 0) {
+        done({ error: tail.trim().split('\n').slice(-8).join('\n') || `exited ${code}` });
+        return;
+      }
+      // After the encode, so a failed export never leaves a .srt describing a
+      // file that does not exist.
+      let srt = null;
+      try {
+        const text = project.subtitles ? toSrt(project.subtitles) : '';
+        if (text) {
+          srt = target.replace(/\.mp4$/i, '.srt');
+          writeFileSync(srt, text);
+        }
+      } catch { srt = null; }        // the video is the deliverable; this is not
+      done({ path: target, srt });
     });
   });
 });

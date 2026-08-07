@@ -54,6 +54,31 @@ is most of what makes a generated video feel authored:
 - **Times snap to a tenth of a second.**
 - An erase sweep runs about 1.5s and should start a beat after the ink lands.
 
+## Subtitles are not captions
+
+Two different things share the word, so be careful which you reach for:
+
+- A **caption** is a text clip. It is artwork: a hand writes it onto the paper,
+  it lives on a page, it has a start and a duration, and you add it with
+  \`add_clip\` or a storyboard beat. Everything else in this guide means this.
+- A **subtitle** is the narration's own words, burned over the whole video.
+  There is exactly one subtitle track per project, it belongs to no page and no
+  lane, and it never moves with the camera. It comes from the audio, not from
+  you.
+
+The subtitle workflow is three calls: \`add_audio\` the voiceover,
+\`transcribe_audio\` and poll \`transcribe_status\`, then \`set_subtitles\` to
+choose a style. Do not type the words yourself -- the timings are what make them
+worth having, and only the recogniser knows them.
+
+Styles: \`bar\` puts the whole line up at once, \`karaoke\` recolours each word
+as it is spoken, \`pop\` reveals one word at a time and wants a low
+\`maxWords\` (2–3) to read the way it is meant to.
+
+Subtitles sit at the bottom of the frame and a storyboard puts its captions at
+the top, so the two do not collide by default. If you place artwork low in the
+frame yourself, raise \`marginBottom\` or check a rendered frame.
+
 ## The rules that are errors, not warnings
 
 An edit breaking any of these is rejected and the document is left untouched.

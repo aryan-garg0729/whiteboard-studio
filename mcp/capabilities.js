@@ -19,8 +19,9 @@
 import { listAnimations } from '../src/engine/anim/registry.js';
 import { HAND_STYLE_IDS, TOOL_STYLE_IDS } from '../src/engine/hand/styles.js';
 import {
-  ANIMATIONS_FOR_KIND, ASSET_KINDS, DEFAULTS, TRANSITIONS,
+  ANIMATIONS_FOR_KIND, ASSET_KINDS, DEFAULTS, SUBTITLE_STYLES, TRANSITIONS,
 } from '../src/engine/model/project.js';
+import { hasWhisper } from '../src/engine/transcribe/whisper.js';
 import { listFonts } from '../electron/fonts.js';
 import { hasFfmpeg } from '../electron/media.js';
 
@@ -75,9 +76,14 @@ export function capabilities() {
     transitions: [...TRANSITIONS],
     assetKinds: [...ASSET_KINDS],
     animationsForKind: ANIMATIONS_FOR_KIND,
+    subtitleStyles: [...SUBTITLE_STYLES],
     defaults: DEFAULTS,
     environment: {
       ffmpeg: hasFfmpeg(),
+      // Same reasoning as ffmpeg: transcribe_audio needs faster-whisper, and
+      // asking up front turns "the job failed" into "this machine has no
+      // recogniser installed".
+      whisper: hasWhisper(),
     },
   };
 }

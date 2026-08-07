@@ -19,7 +19,35 @@ export const DEFAULTS = {
           background: '#fdfdfb', handStyleId: 'hand3', showHand: true },
   transform: { x: 0, y: 0, scale: 1, rotation: 0 },
   camera: { t: 0, x: 0, y: 0, zoom: 1 },
+  // Burned-in narration text. A printed face, not a handwriting face: these are
+  // read at a glance while the hand is drawing something else, so legibility
+  // beats matching the whiteboard's texture.
+  subtitles: {
+    enabled: true,
+    style: 'karaoke',
+    words: [],
+    font: 'assets/fonts/Montserrat.ttf',
+    fontSize: 56,
+    bold: true,
+    color: '#ffffff',
+    highlight: '#ffd54a',
+    background: '#000000cc',
+    marginBottom: 0.08,
+    maxChars: 42,
+    maxWords: 7,
+    gapSplit: 0.6,
+    holdTail: 0.25,
+  },
 };
+
+/**
+ * How the narration's words are presented.
+ *
+ * `bar` shows the whole cue at once and swaps it; `karaoke` shows the whole cue
+ * and recolours each word as it is spoken; `pop` reveals one word at a time.
+ * Kept as data so the check stays honest.
+ */
+export const SUBTITLE_STYLES = new Set(['bar', 'karaoke', 'pop']);
 
 /** Asset kinds the renderer knows how to build. */
 export const ASSET_KINDS = new Set(['image', 'vector', 'text']);
@@ -446,7 +474,83 @@ export function normalizeProject(raw) {
     };
   });
 
-  return { meta, assets, pages, pageBreaks, tracks, clips, audio };
+  // --- subtitles ---
+  // Absent stays absent. Materialising a default block here would rewrite every
+  // project file that has never used the feature the first time it is saved.
+  const subtitles = raw.subtitles === undefined
+    ? undefined
+    : normalizeSubtitles(raw.subtitles);
+
+  return { meta, assets, pages, pageBreaks, tracks, clips, audio, subtitles };
+}
+
+/**
+ * Validate the burned-in narration track.
+ *
+ * This is the transcript, not the artwork: `words` comes from the recogniser and
+ * is the one part of a project a human never types. It is validated strictly
+ * anyway, because a single out-of-order or NaN timing turns into a subtitle that
+ * never leaves the screen.
+ */
+function normalizeSubtitles(raw) {
+  if (!isObj(raw)) throw new ProjectError('subtitles', 'expected an object');
+  const s = { ...DEFAULTS.subtitles, ...raw };
+
+  if (!SUBTITLE_STYLES.has(s.style)) {
+    throw new ProjectError('subtitles.style',
+      `unknown style ${JSON.stringify(s.style)}; expected one of ${[...SUBTITLE_STYLES].join(', ')}`);
+  }
+  if (typeof s.font !== 'string' || !s.font) {
+    throw new ProjectError('subtitles.font', 'expected a font path');
+  }
+  if (typeof s.enabled !== 'boolean') {
+    throw new ProjectError('subtitles.enabled', 'expected true or false');
+  }
+  if (typeof s.bold !== 'boolean') {
+    throw new ProjectError('subtitles.bold', 'expected true or false');
+  }
+  if (!Array.isArray(s.words)) throw new ProjectError('subtitles.words', 'expected an array');
+
+  const words = s.words.map((w, i) => {
+    const at = `subtitles.words[${i}]`;
+    if (!isObj(w)) throw new ProjectError(at, 'expected an object');
+    // The recogniser calls it `word`; accept that spelling so a timestamps.json
+    // straight off faster-whisper can be pasted in without a rename pass.
+    const text = w.w ?? w.word;
+    if (typeof text !== 'string' || !text.trim()) {
+      throw new ProjectError(`${at}.w`, 'expected a non-empty string');
+    }
+    const start = num(w.start, undefined, `${at}.start`, { min: 0 });
+    const end = num(w.end, undefined, `${at}.end`, { min: 0 });
+    if (start === undefined) throw new ProjectError(`${at}.start`, 'required');
+    if (end === undefined) throw new ProjectError(`${at}.end`, 'required');
+    if (end < start) {
+      throw new ProjectError(`${at}.end`,
+        `must not precede start, got ${round2(end)} < ${round2(start)}`);
+    }
+    return { w: text.trim(), start, end };
+  })
+    // Cue building walks these assuming ascending time, the way cameraAt() walks
+    // keyframes; sorting means a hand-edited file still behaves.
+    .sort((a, b) => a.start - b.start);
+
+  return {
+    enabled: s.enabled,
+    style: s.style,
+    words,
+    ...(s.source === undefined ? {} : { source: String(s.source) }),
+    font: s.font,
+    fontSize: num(s.fontSize, 56, 'subtitles.fontSize', { min: 8, max: 400 }),
+    bold: s.bold,
+    color: s.color,
+    highlight: s.highlight,
+    background: s.background,
+    marginBottom: num(s.marginBottom, 0.08, 'subtitles.marginBottom', { min: 0, max: 0.9 }),
+    maxChars: num(s.maxChars, 42, 'subtitles.maxChars', { min: 8, max: 200 }),
+    maxWords: num(s.maxWords, 7, 'subtitles.maxWords', { min: 1, max: 40 }),
+    gapSplit: num(s.gapSplit, 0.6, 'subtitles.gapSplit', { min: 0.05, max: 10 }),
+    holdTail: num(s.holdTail, 0.25, 'subtitles.holdTail', { min: 0, max: 5 }),
+  };
 }
 
 /**
@@ -470,6 +574,14 @@ export function projectDuration(project, tail = 0.6) {
   // without this the timeline stops before it arrives.
   for (const p of project.pages || []) {
     for (const k of p.cameraKeyframes || []) end = Math.max(end, k.t);
+  }
+  // The transcript is the only record of how long the narration runs: an audio
+  // entry counts above just once it has an explicit `duration`, and add_audio
+  // leaves that optional. Without this a project that is voiceover plus
+  // subtitles -- no clips at all -- computes zero frames and refuses to export.
+  // Sorted by `start`, so the last entry is not necessarily the last to finish.
+  for (const w of project.subtitles?.words || []) {
+    end = Math.max(end, w.end + (project.subtitles.holdTail ?? 0));
   }
   return end > 0 ? end + tail : 0;
 }

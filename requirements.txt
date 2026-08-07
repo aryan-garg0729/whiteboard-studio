@@ -1,0 +1,8 @@
+# Optional: only needed to transcribe narration into a subtitle track.
+# Everything else in this tool runs on Node alone.
+#
+#   python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+#
+# `src/engine/transcribe/whisper.js` looks for `.venv/bin/python` first, so a
+# venv at the repo root needs no further configuration.
+faster-whisper>=1.2

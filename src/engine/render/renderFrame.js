@@ -18,6 +18,7 @@ import { ClipSurfaces, newSurface } from './surfaces.js';
 import { drawHand } from './drawHand.js';
 import { advanceErase } from '../anim/erase.js';
 import { TRANSITION_DIR, pageStateAt } from '../model/project.js';
+import { subtitlePlan, drawSubtitles } from './subtitles.js';
 
 /**
  * @typedef {Object} RenderSession
@@ -25,10 +26,16 @@ import { TRANSITION_DIR, pageStateAt } from '../model/project.js';
  * @property {Map<string, ClipSurfaces>} surfaces
  * @property {Map<string, any>} hands        hand style manifests by id
  * @property {(src:Object) => any} resolveImage
+ * @property {Object|null} subtitleFont      parsed opentype font for subtitles
  */
 
-export function createSession({ hands = new Map(), resolveImage = () => null } = {}) {
-  return { plans: new Map(), erasePlans: new Map(), surfaces: new Map(), hands, resolveImage };
+export function createSession({
+  hands = new Map(), resolveImage = () => null, subtitleFont = null,
+} = {}) {
+  return {
+    plans: new Map(), erasePlans: new Map(), surfaces: new Map(), hands, resolveImage,
+    subtitleFont,
+  };
 }
 
 /**
@@ -325,5 +332,18 @@ export function renderFrame(session, project, frameIndex, ctx, opts) {
       drawHand(ctx, style, handAt.tip, handAt.tangent, { w: width, h: height },
         session.resolveImage);
     }
+  }
+
+  // Subtitles go over even the hand, and in screen space like it: they belong to
+  // the video rather than to the paper, so they neither move with the camera nor
+  // slide away with a page. Nothing above is allowed to leave state behind, but
+  // this is the last thing to touch the frame -- reset explicitly rather than
+  // inherit whichever branch ran.
+  const subs = subtitlePlan(session, project);
+  if (subs) {
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+    drawSubtitles(ctx, subs, project, t, { width, height });
   }
 }

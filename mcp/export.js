@@ -14,14 +14,30 @@
  */
 
 import { createCanvas } from '@napi-rs/canvas';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { exportVideo } from '../src/engine/export/driver.js';
+import { toSrt } from '../src/engine/export/srt.js';
 import { renderFrame } from '../src/engine/render/renderFrame.js';
 import { EXPORT_DIR, ensureWorkspace, readablePath } from './workspace.js';
 
 /** Even dimensions: h264 chroma subsampling cannot represent an odd one. */
 const even = (n) => Math.max(2, Math.round(n / 2) * 2);
+
+/**
+ * Write the subtitle sidecar next to the video, if there is a transcript.
+ *
+ * After the encode rather than before it, so a failed export does not leave a
+ * .srt describing a file that does not exist.
+ */
+export function writeSrt(out, project) {
+  const text = project.subtitles ? toSrt(project.subtitles) : '';
+  if (!text) return null;
+  const path = out.replace(/\.mp4$/i, '.srt');
+  writeFileSync(path, text);
+  return path;
+}
 
 export class Exports {
   constructor() {
@@ -32,8 +48,8 @@ export class Exports {
   get(id) { return this.jobs.get(id); }
 
   list() {
-    return [...this.jobs.values()].map(({ id, name, state, frame, total, out, error }) =>
-      ({ id, name, state, frame, total, out, error }));
+    return [...this.jobs.values()].map(({ id, name, state, frame, total, out, srt, error }) =>
+      ({ id, name, state, frame, total, out, srt, error }));
   }
 
   /**
@@ -59,8 +75,8 @@ export class Exports {
 
     const id = `export${++this.seq}`;
     const out = join(EXPORT_DIR, `${name}${scale === 1 ? '' : `-draft${Math.round(scale * 100)}`}.mp4`);
-    const job = { id, name, state: 'running', frame: 0, total: frames, out, error: null,
-                  startedAt: Date.now(), finishedAt: null };
+    const job = { id, name, state: 'running', frame: 0, total: frames, out, srt: null,
+                  error: null, startedAt: Date.now(), finishedAt: null };
     this.jobs.set(id, job);
 
     const full = createCanvas(srcW, srcH);
@@ -91,6 +107,7 @@ export class Exports {
       renderFrameRGBA: render,
       onProgress: ({ frame }) => { job.frame = frame; },
     }).then(() => {
+      job.srt = writeSrt(out, project);
       job.state = 'done';
       job.frame = frames;
       job.finishedAt = Date.now();

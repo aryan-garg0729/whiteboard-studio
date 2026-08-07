@@ -121,6 +121,8 @@ export default function App() {
   const [peaksBySrc, setPeaks] = useState({});
   const [draft, setDraft] = useState(DEFAULT_TEXT);
   const [exporting, setExporting] = useState(false);
+  // null when idle; {percent} while running; {error} when the last run failed.
+  const [transcribing, setTranscribing] = useState(null);
   // Monitoring only -- deliberately not document state, so muting the preview
   // neither dirties the project nor changes what export renders.
   const [muted, setMuted] = useState(false);
@@ -194,7 +196,10 @@ export default function App() {
 
   // ── structural rebuild ────────────────────────────────────────────
   const rebuild = useCallback(async (doc, path, rev) => {
-    if (!doc.clips.length) {
+    // Subtitles render without a single clip -- a voiceover with words over
+    // blank paper is a legitimate project, and skipping the prepare would leave
+    // it with no session, and so no font, and so a blank frame.
+    if (!doc.clips.length && !doc.subtitles?.enabled) {
       sessionRef.current = null;
       setBboxes(null);
       // Nothing left to place -- an undo that emptied the document would
@@ -586,6 +591,33 @@ export default function App() {
     };
   }, [open, draw, frames]);
 
+  /**
+   * Transcribe the narration into the subtitle track.
+   *
+   * Lives here rather than in the Inspector panel that shows it because the
+   * Insert menu offers the same action, and two entry points must not be two
+   * implementations -- nor two jobs racing to commit the same transcript.
+   */
+  const transcribe = useCallback(async () => {
+    const src = ed.doc.audio[0]?.src;
+    if (!src) { setTranscribing({ error: 'Add an audio track first.' }); return; }
+    setTranscribing({ percent: 0 });
+    const stop = window.studio.onTranscribeProgress(
+      (p) => setTranscribing({ percent: Math.round(p * 100) }));
+    try {
+      const r = await window.studio.transcribe(src);
+      if (r?.error) setTranscribing({ error: r.error });
+      else {
+        ed.setSubtitleWords(r.words, { source: src });
+        setTranscribing(null);
+      }
+    } catch (e) {
+      setTranscribing({ error: String(e.message || e) });
+    } finally {
+      stop();
+    }
+  }, [ed]);
+
   const cmd = {
     examples,
     open,
@@ -593,6 +625,7 @@ export default function App() {
     exportVideo,
     importAssets,
     addText,
+    transcribe,
     addPage: () => ed.addPageBreak({ t: frame / meta.fps }),
     addCameraKeyframe: () => {
       if (pageState.u >= 1 && livePage) ed.addCameraKeyframe(livePage.id, frame / meta.fps);
@@ -639,6 +672,7 @@ export default function App() {
         'insert:image': () => c.importAssets('image'),
         'insert:text': c.addText,
         'insert:audio': () => c.importAssets('audio'),
+        'insert:subtitles': c.transcribe,
         'insert:page': c.addPage,
         'insert:camera': c.addCameraKeyframe,
         'view:hand': c.toggleHand,
@@ -719,7 +753,8 @@ export default function App() {
         />
 
         <Inspector ed={ed} selection={selection} hands={hands} fonts={fonts}
-                   frame={frame} fps={meta.fps} bboxes={bboxes} />
+                   frame={frame} fps={meta.fps} bboxes={bboxes}
+                   transcribe={transcribe} transcribing={transcribing} />
       </div>
 
       <Timeline

@@ -22,11 +22,11 @@
 import { createCanvas, loadImage } from '@napi-rs/canvas';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import opentype from 'opentype.js';
 
 import { compileErase } from '../anim/erase.js';
 import { getAnimation } from '../anim/registry.js';
 import { isAppear } from '../anim/appear.js';
+import { parseFont } from '../compile/font.js';
 import { parseSvg } from '../compile/svgDoc.js';
 import { outlineText, traceText } from '../compile/text.js';
 import { styleIdsFor } from '../hand/styles.js';
@@ -120,9 +120,7 @@ async function buildImageClip(clip, asset, { rel }) {
 
 async function buildTextClip(clip, asset, { rel, root }) {
   const fontPath = rel(asset.font || join(root, DEFAULT_FONT));
-  const buf = readFileSync(fontPath);
-  // loadSync is deprecated in opentype.js and silently returns undefined.
-  const font = opentype.parse(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
+  const font = parseFont(readFileSync(fontPath));
 
   const opts = {
     fontSize: asset.fontSize ?? 120,
@@ -145,6 +143,25 @@ async function buildTextClip(clip, asset, { rel, root }) {
 
   const layout = traceText(font, asset.text, opts);
   return { plan: await getAnimation('draw.handwrite').compile({ layout }), layout, vector: layout };
+}
+
+/**
+ * The face the burned-in narration is set in.
+ *
+ * Parsed once per session rather than per clip, and into an instance of its
+ * own: `outlineText` applies the weight axis to the font object it is handed
+ * and memoises a bold mode onto it, so a font shared between a subtitle track
+ * and a text clip at different weights would lay out differently depending on
+ * which was compiled first.
+ *
+ * Returns null rather than throwing when there is nothing to set: a project
+ * with subtitles turned off must not fail to build because a font it never uses
+ * is missing.
+ */
+export function loadSubtitleFont(project, { root, rel = (p) => p }) {
+  const subs = project.subtitles;
+  if (!subs?.enabled || !subs.words?.length) return null;
+  return parseFont(readFileSync(rel(join(root, subs.font))));
 }
 
 /**
@@ -190,6 +207,7 @@ export async function buildNodeSession(raw, { root, rel = (p) => p, onClip } = {
   const session = createSession({
     hands: new Map(styles.map((s) => [s.id, s])),
     resolveImage: (src) => images.get(src.file),
+    subtitleFont: loadSubtitleFont(project, { root, rel }),
   });
 
   // Build every clip's plan up front so a bad asset fails before we render.

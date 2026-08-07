@@ -15,8 +15,8 @@
 import { readFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import opentype from 'opentype.js';
 
+import { parseFont } from '../src/engine/compile/font.js';
 import { parseSvg } from '../src/engine/compile/svgDoc.js';
 import { outlineText, traceText } from '../src/engine/compile/text.js';
 import { styleIdsFor } from '../src/engine/hand/styles.js';
@@ -41,6 +41,38 @@ const MIME = {
 export function dataUrl(path) {
   const ext = path.split('.').pop().toLowerCase();
   return `data:${MIME[ext] || 'image/png'};base64,${readFileSync(path).toString('base64')}`;
+}
+
+/** Parse a font file, turning opentype's opaque failures into actionable ones. */
+function readFont(fontPath) {
+  try {
+    return parseFont(readFileSync(fontPath));
+  } catch (err) {
+    // opentype's own message ("Coverage format must be 1 or 2") names neither
+    // the font nor the fix, which leaves the user stuck.
+    throw new Error(`${fontPath.split('/').pop()} could not be read `
+      + `(${err.message}). Choose a different font.`);
+  }
+}
+
+/**
+ * The subtitle face, as bytes for the renderer to parse.
+ *
+ * Bytes rather than a laid-out transcript on purpose. The renderer cannot read
+ * files, so something has to cross IPC; sending the layout would mean every
+ * change to subtitle size or wrapping needed a main-process round trip, which
+ * would recompile every clip in the project to renumber some text. Sending the
+ * font once lets the renderer re-lay-out locally, so only a change of *face*
+ * costs a re-prepare.
+ *
+ * @returns {string|null} base64, or null when there is nothing to set
+ */
+export function prepareSubtitleFont(project, root) {
+  const subs = project.subtitles;
+  if (!subs?.enabled || !subs.words?.length) return null;
+  const fontPath = isAbsolute(subs.font) ? subs.font : join(root, subs.font);
+  readFont(fontPath);                    // fail here, with a good message
+  return readFileSync(fontPath).toString('base64');
 }
 
 /**
@@ -91,18 +123,7 @@ export async function prepareProject(project, projectPath) {
       prepared[clip.id] = { kind: 'image', art: dataUrl(rel(asset.src)) };
     } else {
       const fontPath = rel(asset.font || DEFAULT_FONT);
-      const buf = readFileSync(fontPath);
-      let font;
-      try {
-        // loadSync is deprecated in opentype.js and silently returns undefined.
-        font = opentype.parse(
-          buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
-      } catch (err) {
-        // opentype's own message ("Coverage format must be 1 or 2") names
-        // neither the font nor the fix, which leaves the user stuck.
-        throw new Error(`${fontPath.split('/').pop()} could not be read `
-          + `(${err.message}). Choose a different font.`);
-      }
+      const font = readFont(fontPath);
       const opts = {
         fontSize: asset.fontSize ?? 120,
         penWidth: asset.penWidth ?? Math.max(2, (asset.fontSize ?? 120) * 0.045),

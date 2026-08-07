@@ -282,6 +282,29 @@ export function useEditor() {
     removePage(id) {
       edit(guard((doc) => edits.removePage(doc, id)));
     },
+
+    /**
+     * Subtitle presentation.
+     *
+     * Non-structural, with one exception: the renderer lays subtitles out
+     * itself from the face the main process sent it, so size, colour, style and
+     * wrapping all repaint locally -- but a different *face* is bytes it does
+     * not have, and only a re-prepare can deliver them.
+     */
+    setSubtitles(patch) {
+      edit(guard((doc) => edits.setSubtitles(doc, patch)),
+        { structural: 'font' in patch || 'enabled' in patch });
+    },
+
+    setSubtitleWords(words, meta) {
+      // Structural because the very first transcript is what makes the main
+      // process start sending a font at all.
+      edit(guard((doc) => edits.setSubtitleWords(doc, words, meta)), { structural: true });
+    },
+
+    removeSubtitles() {
+      edit(guard((doc) => edits.removeSubtitles(doc)), { structural: true });
+    },
   }), [edit]);
 
   return {

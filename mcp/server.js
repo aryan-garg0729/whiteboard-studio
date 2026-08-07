@@ -21,6 +21,7 @@ import { capabilities, animations, fonts, checkHandStyle } from './capabilities.
 import { AUTHORING_GUIDE } from './guide.js';
 import { Exports } from './export.js';
 import { Studio } from './studio.js';
+import { Transcriptions } from './transcribe.js';
 import { renderContactSheet, renderOne, resolveFrame } from './render.js';
 import { storyboard } from './storyboard.js';
 import {
@@ -31,6 +32,7 @@ import { TRANSITIONS } from '../src/engine/model/project.js';
 
 const studio = new Studio({ root: ROOT });
 const exports_ = new Exports();
+const transcriptions = new Transcriptions(studio);
 
 ensureWorkspace();
 
@@ -68,7 +70,8 @@ const tool = (fn) => async (args) => {
   try {
     return await fn(args);
   } catch (e) {
-    const known = ['ProjectError', 'EditError', 'InvalidInput', 'WorkspaceError'];
+    const known = ['ProjectError', 'EditError', 'InvalidInput', 'WorkspaceError',
+      'TranscribeError'];
     if (!known.includes(e.name)) throw e;
     return {
       isError: true,
@@ -391,6 +394,101 @@ server.registerTool('remove_audio', {
   return json({ ok: true, audio: studio.doc(name).audio });
 }));
 
+// ── subtitles ─────────────────────────────────────────────────────────
+//
+// The burned-in narration track. Distinct from the text clips this server
+// elsewhere calls captions: those are artwork a hand writes on the paper, one
+// clip at a time; these are the voiceover's own words, timed to the audio and
+// laid over the whole video.
+
+server.registerTool('transcribe_audio', {
+  title: 'Transcribe narration',
+  description:
+    'Run speech recognition over the project\'s narration and store the word timings as its '
+    + 'subtitle track. Returns immediately with a job id -- poll transcribe_status. Takes '
+    + 'roughly a tenth of the audio\'s length on a CPU. Needs faster-whisper installed; '
+    + 'list_capabilities reports whether it is.',
+  inputSchema: {
+    name: z.string(),
+    index: z.number().min(0).default(0).describe('which audio item, when there is more than one'),
+    src: z.string().optional().describe('transcribe this file instead of the project\'s audio'),
+    model: z.string().optional().describe('faster-whisper model id; defaults to small.en'),
+  },
+}, tool(async ({ name, index, src, model }) => {
+  const doc = studio.doc(name);
+  const from = src ?? doc.audio[index]?.src;
+  if (!from) {
+    throw new edits.EditError(
+      'project has no audio to transcribe; add_audio first, or pass an explicit src');
+  }
+  return json({
+    ok: true,
+    ...transcriptions.start({ name, file: readablePath(from), model }),
+    hint: 'poll transcribe_status with this id, then set_subtitles to style them',
+  });
+}));
+
+server.registerTool('transcribe_status', {
+  title: 'Transcription status',
+  description: 'Progress of a transcription job, or every job when no id is given.',
+  inputSchema: { id: z.string().optional() },
+}, tool(async ({ id }) => {
+  if (!id) return json({ jobs: transcriptions.list() });
+  const job = transcriptions.get(id);
+  if (!job) return json({ ok: false, error: `no such job ${id}` });
+  return json({
+    id: job.id,
+    state: job.state,
+    percent: Math.round(job.progress * 100),
+    words: job.words,
+    out: job.state === 'done' ? job.out : null,
+    error: job.error,
+    elapsed: Math.round(((job.finishedAt ?? Date.now()) - job.startedAt) / 100) / 10,
+  });
+}));
+
+server.registerTool('set_subtitles', {
+  title: 'Set subtitles',
+  description:
+    'Turn the subtitle track on, or change how it looks. Styles: bar shows the whole line at '
+    + 'once, karaoke recolours each word as it is spoken, pop reveals one word at a time '
+    + '(pair it with a low maxWords). Words normally come from transcribe_audio; pass them '
+    + 'here only when you already have timings.',
+  inputSchema: {
+    name: z.string(),
+    enabled: z.boolean().optional(),
+    style: z.enum(['bar', 'karaoke', 'pop']).optional(),
+    font: z.string().optional().describe('a font path from whiteboard://catalog/fonts'),
+    fontSize: z.number().min(8).max(400).optional(),
+    bold: z.boolean().optional(),
+    color: z.string().optional(),
+    highlight: z.string().optional().describe('the spoken word, for karaoke and pop'),
+    background: z.string().optional().describe('the plate behind the text; #00000000 for none'),
+    marginBottom: z.number().min(0).max(0.9).optional().describe('fraction of frame height'),
+    maxChars: z.number().min(8).max(200).optional().describe('per line, before it wraps'),
+    maxWords: z.number().min(1).max(40).optional().describe('per cue, before it breaks'),
+    gapSplit: z.number().min(0.05).max(10).optional().describe('a silence this long ends a cue'),
+    holdTail: z.number().min(0).max(5).optional().describe('how long a cue lingers'),
+    words: z.array(z.object({
+      w: z.string(), start: z.number().min(0), end: z.number().min(0),
+    })).optional(),
+  },
+}, tool(async ({ name, ...patch }) => {
+  const clean = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined));
+  studio.commit(name, (d) => edits.setSubtitles(d, clean));
+  const { words, ...shown } = studio.doc(name).subtitles;
+  return after(name, { subtitles: { ...shown, words: words.length } });
+}));
+
+server.registerTool('remove_subtitles', {
+  title: 'Remove subtitles',
+  description: 'Drop the subtitle track, transcript and all.',
+  inputSchema: { name: z.string() },
+}, tool(async ({ name }) => {
+  studio.commit(name, (d) => edits.removeSubtitles(d));
+  return json({ ok: true, subtitles: null });
+}));
+
 // ── storyboard ────────────────────────────────────────────────────────
 
 server.registerTool('storyboard', {
@@ -598,7 +696,10 @@ server.registerPrompt('single-scene', {
 
 // ── run ───────────────────────────────────────────────────────────────
 
-const shutdown = () => { studio.stop(); process.exit(0); };
+// `studio.stop()` was called here and has never existed, so every signal threw
+// a TypeError on the way out instead of exiting. There is nothing to close:
+// Studio saves on every commit, and background jobs die with the process.
+const shutdown = () => { process.exit(0); };
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
 

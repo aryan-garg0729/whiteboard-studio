@@ -473,6 +473,8 @@ label.check input { accent-color: var(--accent); }
 .pair > .field { display: block; min-width: 0; }
 .pair > .field > label { display: block; margin-bottom: 3px; font-size: 10px; }
 .hint { color: var(--text-faint); line-height: 1.6; }
+/* A hint that is reporting a failure rather than explaining a control. */
+.hint.warn { color: var(--danger); }
 
 .empty-insp { padding: 28px 16px; text-align: center; color: var(--text-faint); line-height: 1.7; }
 

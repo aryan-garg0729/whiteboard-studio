@@ -27,6 +27,29 @@ setSurfaceFactory((w, h) => {
 
 const f64 = (a) => Float64Array.from(a);
 
+/** Font bytes arrive base64 because the prepared payload has to stay JSON-safe. */
+export function base64Bytes(b64) {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+/**
+ * Parse the subtitle face, loading the font parser only if there is one.
+ *
+ * A static import would pull opentype.js into the main bundle -- 267 kB for a
+ * feature most projects do not use, parsed at startup by every window whether
+ * or not it ever shows a subtitle. The renderer had no opentype dependency at
+ * all before subtitles existed; this keeps it that way until a transcript turns
+ * up, at which point the cost is paid during a prepare that is already async.
+ */
+async function subtitleFontFrom(b64) {
+  if (!b64) return null;
+  const { parseFont } = await import('../engine/compile/font.js');
+  return parseFont(base64Bytes(b64));
+}
+
 function loadImage(src) {
   return new Promise((res, rej) => {
     const img = new Image();
@@ -41,7 +64,7 @@ function loadImage(src) {
  * @returns {Promise<{session, project, frames, hand}>}
  */
 export async function buildSession(loaded) {
-  const { project, prepared, hand } = loaded;
+  const { project, prepared, hand, subtitleFont } = loaded;
 
   const images = new Map();
   for (const [file, url] of Object.entries(hand.images)) {
@@ -53,6 +76,9 @@ export async function buildSession(loaded) {
     // scanning this map, and a missing eraser silently draws no hand at all.
     hands: new Map((hand.styles || [hand.style]).map((s) => [s.id, s])),
     resolveImage: (src) => images.get(src.file),
+    // The renderer lays subtitles out itself, from the face the main process
+    // sent, so changing their size or wording repaints without a round trip.
+    subtitleFont: await subtitleFontFrom(subtitleFont),
   });
 
   const artJobs = [];

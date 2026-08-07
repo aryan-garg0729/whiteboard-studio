@@ -25,7 +25,7 @@
  *   told, because "nothing happened" is indistinguishable from success.
  */
 
-import { pageAt } from './project.js';
+import { DEFAULTS, pageAt } from './project.js';
 import { cameraAt } from '../render/renderFrame.js';
 
 /**
@@ -286,6 +286,46 @@ export function patchAudio(doc, index, patch) {
 
 export function removeAudio(doc, index) {
   return { ...doc, audio: doc.audio.filter((_, i) => i !== index) };
+}
+
+// ── subtitles ─────────────────────────────────────────────────────────
+// The burned-in narration track: one per project, no lane, no clips. None of
+// these are structural -- nothing about a clip's compiled geometry depends on
+// them, and forcing a re-prepare on every colour tweak would recompile every
+// drawing in the project to repaint some text.
+
+/**
+ * Turn subtitles on, or change how they look.
+ *
+ * Patching onto DEFAULTS rather than onto `{}` means the first call authors a
+ * complete, renderable block: `set_subtitles {style: 'pop'}` on a project that
+ * has never had subtitles must not produce a track with no font and no size.
+ */
+export function setSubtitles(doc, patch) {
+  return { ...doc, subtitles: { ...DEFAULTS.subtitles, ...doc.subtitles, ...patch } };
+}
+
+/**
+ * Replace the transcript wholesale.
+ *
+ * There is no merge case: words come from one recogniser run over one file, and
+ * splicing two runs together would interleave two different clocks. `source`
+ * records which file they describe, so a later audio swap is detectable.
+ */
+export function setSubtitleWords(doc, words, { source } = {}) {
+  if (!Array.isArray(words)) throw new EditError('subtitle words must be an array');
+  return {
+    ...doc,
+    subtitles: {
+      ...DEFAULTS.subtitles, ...doc.subtitles, words, ...(source ? { source } : {}),
+    },
+  };
+}
+
+/** Drop the track entirely -- the key goes away, rather than emptying in place. */
+export function removeSubtitles(doc) {
+  const { subtitles, ...rest } = doc;
+  return rest;
 }
 
 // ── tracks ────────────────────────────────────────────────────────────
