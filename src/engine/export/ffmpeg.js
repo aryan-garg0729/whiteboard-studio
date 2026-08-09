@@ -10,12 +10,35 @@
  * @property {string} file
  * @property {number} start    seconds on the timeline where it begins
  * @property {number} [trimIn] seconds into the source file to start from
- * @property {number} [duration]
+ * @property {number} [duration] seconds *on the timeline*, after speed
+ * @property {number} [speed]  playback rate, 1 = as recorded; pitch preserved
  * @property {number} [gain]   linear, 1 = unity
  */
 
 /** Milliseconds, integer -- `adelay` takes ms and rejects fractions. */
 const ms = (s) => Math.max(0, Math.round(s * 1000));
+
+/**
+ * `atempo` filters for a playback rate.
+ *
+ * One filter only accepts 0.5..2.0, so anything outside that is a chain: 3x is
+ * a doubling followed by a further 1.5. Chaining is the documented way to do
+ * this and the quality cost is negligible at the rates a narration track gets
+ * pushed to.
+ *
+ * Pitch is preserved, which is the whole reason this is `atempo` and not
+ * `asetrate` -- a sped-up voice should sound hurried, not inhaled.
+ */
+export function atempoChain(speed) {
+  const out = [];
+  let r = speed;
+  while (r > 2) { out.push(2); r /= 2; }
+  while (r < 0.5) { out.push(0.5); r *= 2; }
+  // Float noise in a filter string is unreadable in a log and compares badly in
+  // a test; six places is far past what the filter can hear.
+  if (Math.abs(r - 1) > 1e-6) out.push(Math.round(r * 1e6) / 1e6);
+  return out.map((v) => `atempo=${v}`);
+}
 
 /**
  * Build the `-filter_complex` graph mixing N audio clips onto one output.
@@ -38,10 +61,18 @@ export function buildAudioGraph(clips) {
 
     // atrim selects the slice of the source; asetpts rebases it to zero so the
     // following adelay positions it from the start rather than compounding.
+    //
+    // Trimming happens *before* atempo, so both of its arguments are on the
+    // source's clock: `duration` is timeline seconds and has to be multiplied
+    // back up by the speed to say how much file that is. Doing it in this order
+    // also means atempo only ever processes audio that survives the trim.
     const trimIn = c.trimIn ?? 0;
+    const speed = c.speed ?? 1;
     let trim = `atrim=start=${trimIn}`;
-    if (c.duration != null) trim += `:duration=${c.duration}`;
+    if (c.duration != null) trim += `:duration=${Math.round(c.duration * speed * 1e6) / 1e6}`;
     seg.push(trim, 'asetpts=PTS-STARTPTS');
+
+    if (speed !== 1) seg.push(...atempoChain(speed));
 
     if (c.gain != null && c.gain !== 1) seg.push(`volume=${c.gain}`);
 

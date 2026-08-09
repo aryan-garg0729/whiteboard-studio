@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildAudioGraph, buildFfmpegArgs, parseProgress } from '../src/engine/export/ffmpeg.js';
+import {
+  atempoChain, buildAudioGraph, buildFfmpegArgs, parseProgress,
+} from '../src/engine/export/ffmpeg.js';
 
 test('no audio clips means no filter graph', () => {
   assert.equal(buildAudioGraph([]), null);
@@ -43,6 +45,46 @@ test('a clip starting at zero gets no adelay', () => {
 test('gain of exactly 1 is omitted', () => {
   assert.ok(!buildAudioGraph([{ file: 'a.wav', start: 0, gain: 1 }]).filter.includes('volume='));
   assert.ok(buildAudioGraph([{ file: 'a.wav', start: 0, gain: 0.5 }]).filter.includes('volume=0.5'));
+});
+
+test('speed of exactly 1 changes nothing about the graph', () => {
+  // The regression that matters: every project written before speed existed
+  // normalises to speed 1, and none of them may encode differently for it.
+  const clip = { file: 'a.wav', start: 2, trimIn: 1, duration: 10, gain: 0.5 };
+  assert.equal(buildAudioGraph([{ ...clip, speed: 1 }]).filter,
+    buildAudioGraph([clip]).filter);
+  assert.ok(!buildAudioGraph([{ ...clip, speed: 1 }]).filter.includes('atempo'));
+});
+
+test('atrim length is source seconds, so speed scales it back up', () => {
+  // A 10-second block at 2x is 20 seconds of file.
+  const { filter } = buildAudioGraph([{ file: 'a.wav', start: 0, duration: 10, speed: 2 }]);
+  assert.ok(filter.includes('atrim=start=0:duration=20'), filter);
+  assert.ok(filter.includes('atempo=2'), filter);
+  assert.ok(filter.indexOf('atrim') < filter.indexOf('atempo'),
+    'trimming first keeps both atrim arguments on the source clock');
+});
+
+test('atempo chains for rates outside its own 0.5..2 range', () => {
+  assert.deepEqual(atempoChain(1), []);
+  assert.deepEqual(atempoChain(2), ['atempo=2']);
+  assert.deepEqual(atempoChain(3), ['atempo=2', 'atempo=1.5']);
+  assert.deepEqual(atempoChain(4), ['atempo=2', 'atempo=2']);
+  assert.deepEqual(atempoChain(0.5), ['atempo=0.5']);
+  assert.deepEqual(atempoChain(0.25), ['atempo=0.5', 'atempo=0.5']);
+  // Every chain multiplies back out to the rate that was asked for.
+  for (const s of [0.25, 0.4, 0.75, 1.5, 2.5, 3.2, 4]) {
+    const product = atempoChain(s)
+      .reduce((n, f) => n * Number(f.split('=')[1]), 1);
+    assert.ok(Math.abs(product - s) < 1e-6, `${s} -> ${atempoChain(s).join(',')}`);
+  }
+});
+
+test('an unmeasured clip at speed still gets its atempo', () => {
+  // No duration means atrim has no length argument, but the rate still applies.
+  const { filter } = buildAudioGraph([{ file: 'a.wav', start: 0, speed: 1.5 }]);
+  assert.ok(filter.includes('atrim=start=0,'), filter);
+  assert.ok(filter.includes('atempo=1.5'), filter);
 });
 
 test('audio inputs are numbered after the video pipe', () => {

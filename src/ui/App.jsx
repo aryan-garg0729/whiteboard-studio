@@ -60,6 +60,21 @@ async function registerFonts(list) {
   }));
 }
 
+/**
+ * Fold a `describeFiles` result into the path-keyed media cache.
+ *
+ * Merged per key rather than replaced: a probe that came back with a duration
+ * but no peaks must not wipe the waveform an earlier one supplied.
+ */
+function mergeMedia(cur, described) {
+  const next = { ...cur };
+  for (const f of described) {
+    if (f.kind !== 'audio') continue;
+    next[f.path] = { ...next[f.path], ...(f.peaks ? { peaks: f.peaks } : {}), duration: f.duration };
+  }
+  return next;
+}
+
 /** Rough writing time; a long line should not race by at a fixed duration. */
 const textDuration = (s) => Math.min(12, Math.max(1.6, s.replace(/\s/g, '').length * 0.16));
 
@@ -118,7 +133,11 @@ export default function App() {
   const [fonts, setFonts] = useState([]);
   const [hands, setHands] = useState([]);
   const [library, setLibrary] = useState([]);
-  const [peaksBySrc, setPeaks] = useState({});
+  // path -> {peaks, duration}. Both are facts about the *file*, not about the
+  // edit, so they stay out of the document: the waveform draws the lane, and
+  // the length is what stops a right-edge trim dragging past the end of the
+  // recording. Refilled on import and on open.
+  const [mediaBySrc, setMedia] = useState({});
   const [draft, setDraft] = useState(DEFAULT_TEXT);
   const [exporting, setExporting] = useState(false);
   // null when idle; {percent} while running; {error} when the last run failed.
@@ -308,11 +327,9 @@ export default function App() {
       // (it decodes the whole file) that it must not hold up the open.
       const srcs = loaded.project.audio.map((a) => a.src);
       if (srcs.length) {
-        window.studio.describeFiles(srcs).then((described) => setPeaks((cur) => {
-          const next = { ...cur };
-          for (const f of described) if (f.peaks) next[f.path] = f.peaks;
-          return next;
-        })).catch(() => { /* a lane without a waveform is still usable */ });
+        window.studio.describeFiles(srcs)
+          .then((described) => setMedia((cur) => mergeMedia(cur, described)))
+          .catch(() => { /* a lane without a waveform is still usable */ });
       }
     } catch (e) {
       setError(String(e.message || e));
@@ -328,11 +345,7 @@ export default function App() {
       const seen = new Set(cur.map((a) => a.path));
       return [...cur, ...usable.filter((a) => !seen.has(a.path))];
     });
-    setPeaks((cur) => {
-      const next = { ...cur };
-      for (const f of usable) if (f.peaks) next[f.path] = f.peaks;
-      return next;
-    });
+    setMedia((cur) => mergeMedia(cur, usable));
   }, []);
 
   const importAssets = useCallback(async (kind) => {
@@ -387,8 +400,16 @@ export default function App() {
   }, [ed, placement]);
 
   const addAudioTrack = useCallback((a) => {
-    ed.addAudio({ src: a.path, start: 0, trimIn: 0, gain: 1, duration: a.duration || undefined });
+    // No `start`: addAudio appends to the end of the lane, which is what adding
+    // a second file to a lane that already has one is asking for.
+    ed.addAudio({ src: a.path, trimIn: 0, gain: 1, speed: 1, duration: a.duration || undefined });
   }, [ed]);
+
+  /** Cut the selected audio item at the playhead. Silent when it cannot. */
+  const splitSelectedAudio = useCallback(() => {
+    if (selection?.type !== 'audio') return;
+    ed.splitAudio(selection.id, frame / meta.fps);
+  }, [ed, selection, frame, meta.fps]);
 
   const addText = useCallback(() => {
     const text = draft.text.trim();
@@ -436,7 +457,7 @@ export default function App() {
 
   const deleteSelected = useCallback(() => {
     if (selection?.type === 'clip') { ed.removeClip(selection.id); setSelection(null); }
-    if (selection?.type === 'audio') { ed.removeAudio(selection.index); setSelection(null); }
+    if (selection?.type === 'audio') { ed.removeAudio(selection.id); setSelection(null); }
     if (selection?.type === 'pageBreak') { ed.removePageBreak(selection.index); setSelection(null); }
     if (selection?.type === 'camera') {
       ed.removeCameraKeyframe(selection.pageId, selection.index);
@@ -464,11 +485,15 @@ export default function App() {
       else if (key === 'h') ed.patchMeta({ showHand: !showHand });
       else if (key === 'g') setGuides((g) => !g);
       else if (key === 'c') setTool((t) => (t === 'camera' ? 'select' : 'camera'));
+      // Razor. Lives here rather than in the menu for the reason buildMenu
+      // already documents: a registered accelerator would swallow the letter in
+      // every text field in the app.
+      else if (key === 's') splitSelectedAudio();
       else if (e.key === 'Delete' || e.key === 'Backspace') deleteSelected();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [ed, frames, showHand, deleteSelected]);
+  }, [ed, frames, showHand, deleteSelected, splitSelectedAudio]);
 
   // ── drag & drop import ────────────────────────────────────────────
   useEffect(() => {
@@ -754,6 +779,7 @@ export default function App() {
 
         <Inspector ed={ed} selection={selection} hands={hands} fonts={fonts}
                    frame={frame} fps={meta.fps} bboxes={bboxes}
+                   mediaBySrc={mediaBySrc} onSplitAudio={splitSelectedAudio}
                    transcribe={transcribe} transcribing={transcribing} />
       </div>
 
@@ -765,7 +791,7 @@ export default function App() {
         fps={meta.fps}
         frames={frames}
         onSeek={seek}
-        peaksBySrc={peaksBySrc}
+        mediaBySrc={mediaBySrc}
         height={tlHeight}
         setHeight={setTlHeight}
         mutedTracks={mutedTracks}

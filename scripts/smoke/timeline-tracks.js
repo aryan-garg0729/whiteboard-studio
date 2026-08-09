@@ -34,11 +34,12 @@ for (const a of s0.audio) {
 }
 
 // ── the timeline draws one lane per track, not one per clip ──
-// The page lane is excluded throughout: it is pinned above the track lanes and
-// is not one of them.
-const trackLanes = () => document.querySelectorAll('.tl-lane:not(.page)');
+// The page and camera lanes are excluded throughout: both are pinned above the
+// track lanes, hold no clips, and are not in doc.tracks.
+const trackLanes = () => document.querySelectorAll('.tl-lane:not(.page):not(.camera)');
 const lanes = trackLanes();
-const heads = document.querySelectorAll('.tl-head:not([data-kind="page"])');
+const heads = document.querySelectorAll(
+  '.tl-head:not([data-kind="page"]):not([data-kind="camera"])');
 eq(lanes.length, s0.tracks.length, 'lane count tracks the track count');
 eq(heads.length, s0.tracks.length, 'header count tracks the track count');
 if (s0.clips.length > lanes.length) {

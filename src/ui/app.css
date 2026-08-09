@@ -476,6 +476,19 @@ label.check input { accent-color: var(--accent); }
 /* A hint that is reporting a failure rather than explaining a control. */
 .hint.warn { color: var(--danger); }
 
+/* Preset row: a handful of values worth one click, next to the field that also
+   accepts any other value. Deliberately smaller than a .btn -- these are
+   shortcuts to a number, not commands. */
+.chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.chip {
+  height: 20px; padding: 0 7px;
+  background: var(--bg-raised); color: var(--text-dim);
+  border: 1px solid var(--line-soft); border-radius: 10px;
+  font-size: 10px; cursor: default;
+}
+.chip:hover { background: var(--bg-hover); color: var(--text); }
+.chip.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+
 .empty-insp { padding: 28px 16px; text-align: center; color: var(--text-faint); line-height: 1.7; }
 
 /* ── timeline ──────────────────────────────────────────────────────── */
@@ -615,6 +628,23 @@ label.check input { accent-color: var(--accent); }
 .tl-clip.audio { background: var(--lane-audio); }
 .tl-clip.audio canvas { position: absolute; inset: 0; width: 100%; height: 100%;
                         opacity: .5; pointer-events: none; }
+
+/* A closable run of silence on an audio lane. Sits below the blocks in the
+   stacking order and stays nearly invisible until pointed at: a gap is the
+   absence of content, and drawing it like content makes a lane unreadable. */
+.tl-gap {
+  /* z-index 0, not auto: gaps are emitted before the blocks and must never
+     paint over one, however the two round at the edges. */
+  position: absolute; top: 4px; height: 22px; z-index: 0;
+  border-radius: var(--r); cursor: pointer;
+  display: flex; align-items: center; justify-content: center; overflow: hidden;
+  background: repeating-linear-gradient(45deg,
+    rgba(255,255,255,.03) 0 4px, transparent 4px 8px);
+}
+.tl-gap:hover { background: rgba(255,255,255,.10); box-shadow: inset 0 0 0 1px var(--accent); }
+.tl-gap .glyph { font-size: 10px; color: var(--text-faint); pointer-events: none;
+                 letter-spacing: -1px; }
+.tl-gap:hover .glyph { color: #fff; }
 
 .tl-playhead {
   position: absolute; top: 0; bottom: 0; width: 1px; background: var(--accent-hi);

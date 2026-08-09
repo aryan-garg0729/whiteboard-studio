@@ -95,4 +95,7 @@ export const PATH = {
   fit: 'M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5',
   page: 'M6 3h9l4 4v14H6zM15 3v4h4',
   close: 'M6 6l12 12M18 6L6 18',
+  // Razor: two blades meeting at the cut, which is the playhead.
+  cut: 'M7 4l10 12M17 4L7 16M6 19a2 2 0 104 0 2 2 0 10-4 0M14 19a2 2 0 104 0 2 2 0 10-4 0',
+  speed: 'M12 20a8 8 0 118-8M12 12l5-3',
 };

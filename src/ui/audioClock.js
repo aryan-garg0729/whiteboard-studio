@@ -14,13 +14,23 @@
  * drift against and falls back to `performance.now()` rather than spinning up a
  * context for nothing.
  *
- * Scheduling reads exactly the four fields `buildAudioGraph()` in
- * engine/export/ffmpeg.js reads -- start, trimIn, duration, gain -- so what you
- * hear in preview is what ffmpeg renders. The one intentional divergence: export
- * `apad`s the mix to the video length, preview simply stops.
+ * Scheduling reads exactly the fields `buildAudioGraph()` in
+ * engine/export/ffmpeg.js reads -- start, trimIn, duration, speed, gain -- so
+ * what you hear in preview is what ffmpeg renders. One intentional divergence
+ * remains: export `apad`s the mix to the video length, preview simply stops.
+ *
+ * Speed is why there are two buffer caches. `playbackRate` would be a one-line
+ * implementation and the wrong one: it resamples, so a voice at 2x is a voice
+ * an octave up, and export's `atempo` preserves pitch. So the sound is
+ * time-stretched instead (see timeStretch.js) into its own buffer, and playback
+ * runs at rate 1 over that. Decoding is slow I/O and is cached per file
+ * forever; stretching is fast CPU that depends on a document field, so it is
+ * cached per (file, speed) and swept when nothing references it.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+
+import { stretchBuffer } from './timeStretch.js';
 
 /**
  * Scheduling lead. `start(when)` with `when` already past fires immediately and
@@ -30,15 +40,32 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 const LEAD = 0.05;
 
 /**
+ * How long to sit still before stretching.
+ *
+ * Dragging the speed slider emits a change per pixel, and stretching a minute
+ * of audio on each of them would lock the main thread solid. Waiting for the
+ * gesture to settle costs nothing: playback stretches on demand anyway.
+ */
+const STRETCH_IDLE = 180;
+
+/** Two decimals is finer than anyone can hear and coarse enough to cache. */
+const rateOf = (track) => Math.round((track.speed || 1) * 100) / 100;
+const cacheKey = (track) => `${track.src}@${rateOf(track)}`;
+
+/**
  * When a track ends on the timeline, in seconds.
  *
  * `duration` is optional -- ffprobe returns null when it is unavailable, and the
  * document carries `undefined` rather than guessing. In that case the file plays
  * out from `trimIn` to its own end, which is what `atrim` with no duration does.
+ *
+ * `buffer` here is the *stretched* one, so its duration is already on the
+ * timeline's clock and there is no rate to divide by. `trimIn` is source
+ * seconds and has to be converted to reach it.
  */
 function trackEnd(track, buffer) {
   const start = track.start || 0;
-  const trimIn = track.trimIn || 0;
+  const trimIn = (track.trimIn || 0) / (track.speed || 1);
   if (track.duration != null) return start + track.duration;
   return start + Math.max(0, buffer.duration - trimIn);
 }
@@ -61,7 +88,8 @@ export function useAudioClock({
 }) {
   const ctxRef = useRef(null);
   const masterRef = useRef(null);
-  const buffersRef = useRef(new Map());   // src -> AudioBuffer
+  const rawRef = useRef(new Map());       // src -> AudioBuffer, as decoded
+  const buffersRef = useRef(new Map());   // `src@speed` -> AudioBuffer, stretched
   const pendingRef = useRef(new Map());   // src -> Promise, so N lanes decode once
   const sourcesRef = useRef([]);
   // Per-track gain nodes, kept so a lane can be muted without tearing down and
@@ -92,18 +120,42 @@ export function useAudioClock({
     return ctxRef.current;
   }, []);
 
-  // ── decode ahead of time ──────────────────────────────────────────
+  /**
+   * The buffer a track actually plays: decoded, then time-stretched to its rate.
+   *
+   * Stretches on a miss rather than returning nothing. It costs tens of
+   * milliseconds and only happens when playback starts on a rate the idle pass
+   * has not reached yet -- a pause that short before the first sample is
+   * invisible, and the alternative is hearing the wrong pitch, which is the
+   * entire bug this cache exists to fix.
+   *
+   * Returns null only while the decode itself is still in flight.
+   */
+  const stretched = useCallback((track) => {
+    const key = cacheKey(track);
+    const hit = buffersRef.current.get(key);
+    if (hit) return hit;
+    const raw = rawRef.current.get(track.src);
+    if (!raw) return null;
+    const ctx = ctxRef.current;
+    if (!ctx) return null;
+    const buf = stretchBuffer(ctx, raw, rateOf(track));
+    buffersRef.current.set(key, buf);
+    return buf;
+  }, []);
+
+  // ── decode, then stretch, ahead of time ───────────────────────────
   // Pressing space must be instant, so tracks are decoded when they are added,
   // not when playback starts. decodeAudioData works on a suspended context, so
   // this does not need a user gesture.
   useEffect(() => {
-    if (!hasAudio || !window.studio?.readAudio) return;
+    if (!hasAudio || !window.studio?.readAudio) return undefined;
     const ctx = context();
-    if (!ctx) return;
+    if (!ctx) return undefined;
 
     for (const t of tracks) {
       const src = t.src;
-      if (buffersRef.current.has(src) || pendingRef.current.has(src)) continue;
+      if (rawRef.current.has(src) || pendingRef.current.has(src)) continue;
       const job = (async () => {
         const bytes = await window.studio.readAudio(src);
         if (!(bytes instanceof Uint8Array)) throw new Error(bytes?.error || 'unreadable');
@@ -111,7 +163,7 @@ export function useAudioClock({
         // a view into a larger one, so hand it its own copy.
         const ab = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
         const buf = await ctx.decodeAudioData(ab);
-        buffersRef.current.set(src, buf);
+        rawRef.current.set(src, buf);
         bumpDecoded((n) => n + 1);
       })().catch(() => {
         // A track that will not decode stays silent; it must not break playback
@@ -121,7 +173,20 @@ export function useAudioClock({
       });
       pendingRef.current.set(src, job);
     }
-  }, [tracks, hasAudio, context]);
+
+    // Stretch once the gesture settles. Debounced because this effect re-runs on
+    // every document edit, and a speed drag is a hundred of them.
+    const idle = setTimeout(() => {
+      const wanted = new Set(tracks.map(cacheKey));
+      // Sweep first: a rate nothing plays any more is a megabyte per minute of
+      // audio held for nothing, and a slider drag walks through dozens of them.
+      for (const key of buffersRef.current.keys()) {
+        if (!wanted.has(key)) buffersRef.current.delete(key);
+      }
+      for (const t of tracks) stretched(t);
+    }, STRETCH_IDLE);
+    return () => clearTimeout(idle);
+  }, [tracks, hasAudio, context, stretched]);
 
   // Master gain follows the transport's mute/volume without restarting anything.
   useEffect(() => {
@@ -168,11 +233,14 @@ export function useAudioClock({
       if (!ctx) return;
       const t0 = fromFrame / fps;
       for (const track of tracksRef.current) {
-        const buffer = buffersRef.current.get(track.src);
+        const buffer = stretched(track);
         if (!buffer) continue;                       // still decoding, or failed
 
         const start = track.start || 0;
-        const trimIn = track.trimIn || 0;
+        // The buffer is already at the track's rate, so everything below is on
+        // one clock -- the timeline's. Only `trimIn` needs converting: it is
+        // seconds into the *source*, and the stretch moved them.
+        const trimIn = (track.trimIn || 0) / (track.speed || 1);
         const end = trackEnd(track, buffer);
         if (end <= t0) continue;                     // already played out
 
@@ -232,7 +300,7 @@ export function useAudioClock({
     // `frame` is read through a ref on purpose: it changes every tick and would
     // restart the loop, pinning playback to the first frame.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playing, frames, fps, hasAudio, context, setFrame, setPlaying]);
+  }, [playing, frames, fps, hasAudio, context, stretched, setFrame, setPlaying]);
 
   // Tear the context down with the editor, not with each play.
   useEffect(() => () => { ctxRef.current?.close().catch(() => {}); }, []);

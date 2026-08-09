@@ -160,6 +160,14 @@ test('a clip cannot name a track that does not exist or holds the wrong kind', (
   throwsAt({ ...m, audio: [{ src: 'v.mp3', trackId: 'v1' }] }, 'audio[0].trackId');
 });
 
+test('audio speed is bounded, and defaults to as-recorded', () => {
+  const m = minimal();
+  assert.equal(normalizeProject({ ...m, audio: [{ src: 'v.mp3' }] }).audio[0].speed, 1);
+  assert.equal(normalizeProject({ ...m, audio: [{ src: 'v.mp3', speed: 2 }] }).audio[0].speed, 2);
+  throwsAt({ ...m, audio: [{ src: 'v.mp3', speed: 5 }] }, 'audio[0].speed');
+  throwsAt({ ...m, audio: [{ src: 'v.mp3', speed: 0 }] }, 'audio[0].speed');
+});
+
 test('every shipped example still normalises now that tracks exist', () => {
   for (const f of ['demo.project.json', 'svg.project.json']) {
     const raw = JSON.parse(readFileSync(new URL(`../examples/${f}`, import.meta.url), 'utf8'));

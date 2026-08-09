@@ -461,15 +461,29 @@ export function normalizeProject(raw) {
     return clip;
   });
 
+  // Audio was addressed by array position until splitting arrived: a split
+  // inserts an item and renumbers everything after it, so identity has to be
+  // intrinsic. Files written before this have no ids and are given one by
+  // position -- deterministic, so the same file always loads the same handles.
+  const audioIds = new Set();
   const audio = (raw.audio || []).map((a, i) => {
     const at = `audio[${i}]`;
     if (!a.src) throw new ProjectError(`${at}.src`, 'required');
+    let id = typeof a.id === 'string' && a.id ? a.id : `aud${i + 1}`;
+    for (let n = 2; audioIds.has(id); n++) id = `aud${i + 1}-${n}`;
+    audioIds.add(id);
     return {
+      id,
       src: a.src,
       trackId: trackFor(a.trackId, 'audio', at),
       start: num(a.start, 0, `${at}.start`, { min: 0 }),
       trimIn: num(a.trimIn, 0, `${at}.trimIn`, { min: 0 }),
+      // Timeline seconds, not source seconds. At speed 2 a 3s block consumes 6s
+      // of the file -- keeping `duration` on the timeline's clock is what lets
+      // projectDuration, packTrack and the Timeline's block width stay unaware
+      // that speed exists at all.
       duration: a.duration === undefined ? undefined : num(a.duration, 0, `${at}.duration`, { min: 0.01 }),
+      speed: num(a.speed, 1, `${at}.speed`, { min: 0.25, max: 4 }),
       gain: num(a.gain, 1, `${at}.gain`, { min: 0, max: 8 }),
     };
   });

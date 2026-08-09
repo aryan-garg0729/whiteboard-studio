@@ -86,7 +86,18 @@ export const clipEnd = (c) =>
   (c.erase ? Math.max(c.erase.start + c.erase.duration, c.start + c.duration)
            : c.start + c.duration);
 
-const audioEnd = (a) => (a.start || 0) + (a.duration || 0);
+/**
+ * When an audio item stops on the timeline.
+ *
+ * `duration` is timeline seconds and may be absent -- ffprobe returns null often
+ * enough that the document carries `undefined` rather than guessing. `srcLen`,
+ * when a caller happens to know the file's real length, closes that hole: an
+ * unprobed item is otherwise treated as zero-length and two of them will stack
+ * on one lane. Divided by `speed`, because a file played at 2x occupies half as
+ * much of the timeline as it has seconds in it.
+ */
+export const audioEnd = (a, srcLen) => (a.start || 0) + (a.duration
+  ?? (srcLen != null ? Math.max(0, srcLen - (a.trimIn || 0)) / (a.speed || 1) : 0));
 
 /** Half-open overlap; two clips that merely touch at an edge may share a lane. */
 const overlaps = (aStart, aEnd, bStart, bEnd) => aStart < bEnd && bStart < aEnd;
@@ -273,19 +284,225 @@ export function patchMeta(doc, patch) {
 }
 
 // ── audio ─────────────────────────────────────────────────────────────
+//
+// One rule underlies everything here: **two items never overlap on one lane.**
+// Overlapping audio does not read as an edit, it reads as a bug -- both files
+// play at once and the mix is a surprise. So every path that can move or resize
+// an item goes through `audioSlot`, and the worst a drag can do is stop flush
+// against its neighbour.
+//
+// The other thing to keep straight is which clock a number is on. `start` and
+// `duration` are *timeline* seconds; `trimIn` is *source* seconds. At speed 1
+// they coincide, which is why the distinction never mattered before.
 
+/** Shortest audio item worth having. Below this a block is not clickable. */
+export const MIN_AUDIO = 0.05;
+
+/** Index or id. Audio grew ids late, so both spellings stay valid. */
+export function audioIndex(doc, ref) {
+  const i = typeof ref === 'number' ? ref : doc.audio.findIndex((a) => a.id === ref);
+  if (i < 0 || i >= doc.audio.length) {
+    throw new EditError(`no such audio item ${JSON.stringify(ref)}`);
+  }
+  return i;
+}
+
+/** Items on one lane, ascending, optionally minus the one being moved. */
+const laneItems = (doc, trackId, skipId) => doc.audio
+  .filter((a) => a.trackId === trackId && a.id !== skipId)
+  .map((a) => ({ start: a.start || 0, end: audioEnd(a) }))
+  .sort((p, q) => p.start - q.start);
+
+/** Where a lane runs out: the end of its last item, or zero when it is empty. */
+export function laneEnd(doc, trackId, skipId) {
+  return laneItems(doc, trackId, skipId).reduce((end, s) => Math.max(end, s.end), 0);
+}
+
+/**
+ * The nearest free start for a `length`-second block on `trackId`.
+ *
+ * `wantStart` is a request, not an instruction. When it collides, the answer is
+ * whichever side of the obstruction is nearer -- flush after it, or flush
+ * before it -- which is what makes dragging feel like the block is butting up
+ * against its neighbour rather than teleporting past it.
+ *
+ * A zero-length block (an item whose duration ffprobe could not determine) is
+ * measured as MIN_AUDIO so it still collides with something.
+ */
+export function audioSlot(doc, trackId, wantStart, length, skipId) {
+  const len = Math.max(length || 0, MIN_AUDIO);
+  const others = laneItems(doc, trackId, skipId);
+  const free = (s) => s >= 0 && !others.some((n) => s < n.end && n.start < s + len);
+
+  const want = Math.max(0, wantStart);
+  if (free(want)) return round3(want);
+
+  const candidates = [];
+  for (const n of others) candidates.push(n.end, n.start - len);
+  const valid = candidates.filter(free);
+  // Nothing fits anywhere before the end of the lane, so go after it.
+  if (!valid.length) return round3(laneEnd(doc, trackId, skipId));
+  return round3(valid.reduce((best, c) =>
+    (Math.abs(c - want) < Math.abs(best - want) ? c : best)));
+}
+
+/**
+ * Lay an item on a lane, after whatever is already there.
+ *
+ * Appending is the default because it is what "add another one" means: dropping
+ * a second file onto a lane that already has one is asking for the two of them
+ * in sequence, not for both at zero playing over each other. An explicit
+ * `start` is still honoured, but it is a request like any other and slides to
+ * the nearest free spot rather than overlapping.
+ */
 export function addAudio(doc, track) {
-  const start = track.start || 0;
-  const { trackId, tracks } = packTrack(doc, 'audio', start, start + (track.duration || 0));
-  return { ...doc, tracks, audio: [...doc.audio, { ...track, trackId }] };
+  const existing = track.trackId ?? doc.tracks.find((t) => t.kind === 'audio')?.id;
+  // A document always has an audio lane after normalisation, but a hand-built
+  // one passed straight to a transform might not.
+  const { trackId, tracks } = existing
+    ? { trackId: existing, tracks: doc.tracks }
+    : packTrack(doc, 'audio', 0, track.duration || 0);
+  const start = audioSlot(doc, trackId,
+    track.start ?? laneEnd(doc, trackId), track.duration || 0);
+  const id = uniqueId('aud', new Set(doc.audio.map((a) => a.id)));
+  return { ...doc, tracks, audio: [...doc.audio, { ...track, id, trackId, start }] };
 }
 
-export function patchAudio(doc, index, patch) {
-  return { ...doc, audio: doc.audio.map((a, i) => (i === index ? { ...a, ...patch } : a)) };
+/**
+ * Change an item's rate, resizing it to hold the same audio.
+ *
+ * The resize is the point. `duration` is timeline seconds, so the same
+ * recording at 2x occupies half as much of the timeline -- leaving it alone
+ * meant the block went on claiming its old length while holding half as much
+ * sound, and `atrim` asked for more file than the trim had left. The remainder
+ * came out as silence, in preview and in the MP4 alike.
+ *
+ * The rest of the lane slides by the same delta. This is the one place
+ * something moves that the user did not select, and it is deliberate: the
+ * alternative is a lane that grows a hole every time a take is sped up, which
+ * is the bug this is fixing wearing a different hat. Uniform shift, so no
+ * overlap can appear and the spacing between later items is preserved exactly.
+ *
+ * `trimIn` is untouched -- it is source seconds, and the in-point has not moved.
+ */
+export function setAudioSpeed(doc, ref, speed) {
+  const index = audioIndex(doc, ref);
+  const a = doc.audio[index];
+  const old = a.speed || 1;
+  if (speed === old) return doc;
+
+  // An item ffprobe could not measure has no length to rescale; it plays to the
+  // end of the file either way, just faster.
+  const duration = a.duration == null ? undefined : round3(a.duration * old / speed);
+  const shift = (duration ?? 0) - (a.duration ?? 0);
+  const from = audioEnd(a);
+
+  return {
+    ...doc,
+    audio: doc.audio.map((x, i) => {
+      if (i === index) return { ...x, speed, duration };
+      if (!shift || x.trackId !== a.trackId || (x.start || 0) < from) return x;
+      return { ...x, start: round3((x.start || 0) + shift) };
+    }),
+  };
 }
 
-export function removeAudio(doc, index) {
+/** Fields whose new value could put an item on top of a neighbour. */
+const PLACEMENT_FIELDS = ['start', 'duration', 'trackId'];
+
+export function patchAudio(doc, ref, patch) {
+  // Speed carries a length change with it, unless the caller states a length of
+  // its own -- an explicit `{speed, duration}` is someone who knows what they
+  // want, and second-guessing them would make the pair unusable.
+  if ('speed' in patch && !('duration' in patch)) {
+    const rest = { ...patch };
+    delete rest.speed;
+    const respeeded = setAudioSpeed(doc, ref, patch.speed);
+    return Object.keys(rest).length ? patchAudio(respeeded, ref, rest) : respeeded;
+  }
+
+  const index = audioIndex(doc, ref);
+  const next = { ...doc.audio[index], ...patch };
+  if (PLACEMENT_FIELDS.some((k) => k in patch)) {
+    next.start = audioSlot(doc, next.trackId, next.start || 0, next.duration || 0, next.id);
+  }
+  return { ...doc, audio: doc.audio.map((a, i) => (i === index ? next : a)) };
+}
+
+export function removeAudio(doc, ref) {
+  const index = audioIndex(doc, ref);
   return { ...doc, audio: doc.audio.filter((_, i) => i !== index) };
+}
+
+/**
+ * Cut an item in two at timeline second `t`.
+ *
+ * The halves abut exactly, so neither needs re-placing and the lane's no-overlap
+ * invariant survives for free. The one subtlety is `trimIn`: it is on the
+ * source's clock, so the right half skips `(t - start) * speed` seconds of file,
+ * not `(t - start)`.
+ *
+ * An item whose duration was never probed splits fine -- the right half inherits
+ * the same `undefined` and plays to the end of the file, which is what it was
+ * doing before the cut.
+ */
+export function splitAudio(doc, ref, t) {
+  const index = audioIndex(doc, ref);
+  const a = doc.audio[index];
+  const start = a.start || 0;
+  const speed = a.speed || 1;
+  const end = audioEnd(a);
+  // Only a cut with two real halves is an edit anyone meant; a slice a
+  // twentieth of a second long is a misclick.
+  if (t - start < MIN_AUDIO || (a.duration != null && end - t < MIN_AUDIO)) {
+    throw new EditError(
+      `cannot split at ${round3(t)}s: the playhead is not inside the audio item`);
+  }
+  const left = { ...a, duration: round3(t - start) };
+  const right = {
+    ...a,
+    id: uniqueId('aud', new Set(doc.audio.map((x) => x.id))),
+    start: round3(t),
+    trimIn: round3((a.trimIn || 0) + (t - start) * speed),
+    duration: a.duration == null ? undefined : round3(end - t),
+  };
+  const audio = [...doc.audio];
+  audio.splice(index, 1, left, right);
+  return { ...doc, audio };
+}
+
+/**
+ * Close the silence at `t` on `trackId` by pulling everything after it left.
+ *
+ * Lane-local on purpose. Rippling every lane would drag the music along with
+ * the narration it was placed against, and rippling the clips too would desync
+ * the drawing -- neither is what "delete this gap" asks for.
+ */
+export function closeAudioGap(doc, trackId, t) {
+  const items = laneItems(doc, trackId);
+  if (!items.length) throw new EditError('that lane is empty');
+
+  if (items.some((it) => t >= it.start && t < it.end)) {
+    throw new EditError('that is an audio item, not a gap');
+  }
+  // The run of silence containing `t`: from the end of the last item before it
+  // (or zero, for the lead-in) to the start of the first item after it.
+  const before = items.filter((it) => it.end <= t).pop();
+  const after = items.find((it) => it.start > t);
+  // Trailing silence has nothing after it to pull back, so there is nothing to
+  // close -- the lane simply ends there.
+  if (!after) throw new EditError('there is nothing after that gap to pull back');
+  const from = before ? before.end : 0;
+  const to = after.start;
+  const width = round3(to - from);
+  if (width < MIN_AUDIO) throw new EditError('there is no gap there');
+
+  return {
+    ...doc,
+    audio: doc.audio.map((a) => (a.trackId === trackId && (a.start || 0) >= to
+      ? { ...a, start: round3((a.start || 0) - width) }
+      : a)),
+  };
 }
 
 // ── subtitles ─────────────────────────────────────────────────────────

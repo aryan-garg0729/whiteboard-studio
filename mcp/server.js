@@ -369,26 +369,71 @@ server.registerTool('set_meta', {
   return after(name, { meta: studio.doc(name).meta });
 }));
 
+/** Every audio tool addresses an item the same way: by id, or by position. */
+const audioRef = z.union([z.number().min(0), z.string()]);
+
 server.registerTool('add_audio', {
   title: 'Add audio',
-  description: 'Lay an audio file onto an audio lane. Import it into the workspace first.',
+  description: 'Lay an audio file onto an audio lane, after whatever is already on it. '
+    + 'Import it into the workspace first. Items on a lane never overlap: an explicit '
+    + '`start` slides forward to the nearest free spot rather than mixing over a neighbour.',
   inputSchema: {
     name: z.string(),
     src: z.string(),
-    start: z.number().min(0).default(0),
-    trimIn: z.number().min(0).default(0),
-    duration: z.number().min(0.01).optional(),
+    start: z.number().min(0).optional()
+      .describe('seconds; omit to append to the end of the lane'),
+    trimIn: z.number().min(0).default(0)
+      .describe('seconds into the source file to start from'),
+    duration: z.number().min(0.01).optional()
+      .describe('seconds on the timeline, after speed is applied'),
+    speed: z.number().min(0.25).max(4).default(1)
+      .describe('playback rate; pitch is preserved'),
     gain: z.number().min(0).max(8).default(1),
+    trackId: z.string().optional(),
   },
 }, tool(async ({ name, src, ...track }) => {
   studio.commit(name, (d) => edits.addAudio(d, { src: readablePath(src), ...track }));
   return json({ ok: true, audio: studio.doc(name).audio });
 }));
 
+server.registerTool('update_audio', {
+  title: 'Update audio',
+  description: 'Retime, trim, retempo or rebalance an audio item. '
+    + 'Lengths are timeline seconds; `trimIn` is seconds into the source file.',
+  inputSchema: {
+    name: z.string(),
+    ref: audioRef.describe('the item id, or its index in the audio list'),
+    start: z.number().min(0).optional(),
+    trimIn: z.number().min(0).optional(),
+    duration: z.number().min(0.01).optional(),
+    speed: z.number().min(0.25).max(4).optional(),
+    gain: z.number().min(0).max(8).optional(),
+    trackId: z.string().optional(),
+  },
+}, tool(async ({ name, ref, ...patch }) => {
+  const clean = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined));
+  studio.commit(name, (d) => edits.patchAudio(d, ref, clean));
+  return json({ ok: true, audio: studio.doc(name).audio });
+}));
+
+server.registerTool('split_audio', {
+  title: 'Split audio',
+  description: 'Cut an audio item in two at time `t`. The halves abut exactly, so '
+    + 'removing one leaves a gap rather than resequencing the lane.',
+  inputSchema: {
+    name: z.string(),
+    ref: audioRef.describe('the item id, or its index in the audio list'),
+    t: z.number().min(0).describe('seconds on the timeline; must be inside the item'),
+  },
+}, tool(async ({ name, ref, t }) => {
+  studio.commit(name, (d) => edits.splitAudio(d, ref, t));
+  return json({ ok: true, audio: studio.doc(name).audio });
+}));
+
 server.registerTool('remove_audio', {
   title: 'Remove audio',
-  description: 'Drop an audio item by its index.',
-  inputSchema: { name: z.string(), index: z.number().min(0) },
+  description: 'Drop an audio item by its id or its index.',
+  inputSchema: { name: z.string(), index: audioRef },
 }, tool(async ({ name, index }) => {
   studio.commit(name, (d) => edits.removeAudio(d, index));
   return json({ ok: true, audio: studio.doc(name).audio });

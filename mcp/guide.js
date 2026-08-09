@@ -54,6 +54,22 @@ is most of what makes a generated video feel authored:
 - **Times snap to a tenth of a second.**
 - An erase sweep runs about 1.5s and should start a beat after the ink lands.
 
+## Audio lanes are sequences, not stacks
+
+\`add_audio\` appends: an item lands after whatever is already on its lane, and
+two items on one lane never overlap. Pass an explicit \`start\` when you want a
+particular moment -- it will slide forward to the nearest free spot rather than
+mixing over a neighbour. To layer music *under* narration, put it on a second
+lane (\`trackId\`), which is what lanes are for.
+
+\`update_audio\` retimes, trims and retempos; \`split_audio\` cuts an item in two
+at an instant, which is how you drop a bad take out of the middle of a
+recording -- split twice, then \`remove_audio\` the middle piece.
+
+Two clocks to keep straight: \`start\` and \`duration\` are seconds **on the
+timeline**, \`trimIn\` is seconds **into the source file**. At \`speed\` 2 a
+3-second item consumes 6 seconds of the recording. Speed preserves pitch.
+
 ## Subtitles are not captions
 
 Two different things share the word, so be careful which you reach for:

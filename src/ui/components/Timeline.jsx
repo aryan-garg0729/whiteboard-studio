@@ -16,6 +16,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { pageAt, pageWindows } from '../../engine/model/project.js';
+import { MIN_AUDIO, audioEnd } from '../../engine/model/edits.js';
 import { Icon, PATH } from './common.jsx';
 
 const SNAP_PX = 6;
@@ -23,8 +24,53 @@ const SNAP_PX = 6;
 const LANE_H = 30;
 /** Coarse-to-fine ruler steps; the first one wide enough on screen wins. */
 const STEPS = [0.1, 0.25, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300];
+/**
+ * Silence narrower than this is not offered as a closable gap. Below a few
+ * pixels the target is unhittable, and a hundredth of a second of air between
+ * two takes is a rounding artefact rather than something anyone wants removed.
+ */
+const MIN_GAP = 0.05;
 
 const round1 = (t) => Math.round(t * 10) / 10;
+const round3 = (t) => Math.round(t * 1000) / 1000;
+
+/**
+ * How far an audio item may be trimmed before it runs into its lane neighbours.
+ *
+ * `Infinity` on the right when nothing follows: a lane's last item can grow for
+ * as long as its recording lasts.
+ */
+function audioNeighbours(doc, id) {
+  const me = doc.audio.find((a) => a.id === id);
+  let prevEnd = 0;
+  let nextStart = Infinity;
+  for (const a of doc.audio) {
+    if (a.id === id || a.trackId !== me.trackId) continue;
+    const s = a.start || 0;
+    if (s >= (me.start || 0)) nextStart = Math.min(nextStart, s);
+    else prevEnd = Math.max(prevEnd, audioEnd(a));
+  }
+  return { prevEnd, nextStart };
+}
+
+/**
+ * The runs of silence on one lane, as `{start, end}` in seconds.
+ *
+ * Includes the lead-in before the first item -- pulling a lane back to zero is
+ * the same gesture as closing any other gap. Excludes the tail, which has
+ * nothing after it to pull back and so is not a gap but simply the end.
+ */
+function laneGaps(items) {
+  const sorted = [...items].sort((p, q) => (p.a.start || 0) - (q.a.start || 0));
+  const out = [];
+  let cursor = 0;
+  for (const { a } of sorted) {
+    const s = a.start || 0;
+    if (s - cursor > MIN_GAP) out.push({ start: cursor, end: s });
+    cursor = Math.max(cursor, audioEnd(a));
+  }
+  return out;
+}
 
 function useWaveform(peaks, width, height) {
   const ref = useRef(null);
@@ -46,19 +92,46 @@ function useWaveform(peaks, width, height) {
   return ref;
 }
 
-function AudioClip({ track, index, peaks, pxPerSec, duration, selected, onSelect, onDrag }) {
+function AudioClip({ track, peaks, pxPerSec, duration, selected, onSelect, onDrag }) {
   const width = Math.max(6, duration * pxPerSec);
   const ref = useWaveform(peaks, width, 22);
   const name = track.src.split('/').pop();
+  const speed = track.speed ?? 1;
+  const down = (e, edge) => { onSelect(); onDrag(e, { kind: 'audio', id: track.id, edge }); };
   return (
     <div
       className={`tl-clip audio${selected ? ' sel' : ''}`}
       style={{ left: (track.start || 0) * pxPerSec, width }}
-      title={name}
-      onPointerDown={(e) => { onSelect(); onDrag(e, { kind: 'audio', index, edge: 'move' }); }}
+      title={speed === 1 ? name : `${name} — ${speed}×`}
+      onPointerDown={(e) => down(e, 'move')}
     >
       <canvas ref={ref} />
-      <span className="label">{name}</span>
+      {/* Same grips clips have: trimming audio by dragging its edge is the same
+          gesture as resizing a draw, and should not be a different one. */}
+      <span className="grip l" onPointerDown={(e) => { e.stopPropagation(); down(e, 'start'); }} />
+      <span className="label">{speed === 1 ? name : `${name} ${speed}×`}</span>
+      <span className="grip r" onPointerDown={(e) => { e.stopPropagation(); down(e, 'end'); }} />
+    </div>
+  );
+}
+
+/**
+ * A run of silence on an audio lane, as a click-target that closes it.
+ *
+ * Dragging every later item back by hand is the tedious way to do what is
+ * almost always the intent, so the gap itself offers to do it. Quiet until
+ * hovered: a gap is the absence of content and should not read as content.
+ */
+function Gap({ left, width, onClose }) {
+  return (
+    <div
+      className="tl-gap"
+      style={{ left, width }}
+      title="Close this gap — pulls everything after it back"
+      onPointerDown={(e) => e.stopPropagation()}
+      onClick={onClose}
+    >
+      <span className="glyph">›‹</span>
     </div>
   );
 }
@@ -267,7 +340,7 @@ function TrackHead({ track, count, canRemove, muted, onMute, onRename, onRemove 
 }
 
 export default function Timeline({
-  ed, selection, setSelection, frame, fps, frames, onSeek, peaksBySrc, height, setHeight,
+  ed, selection, setSelection, frame, fps, frames, onSeek, mediaBySrc, height, setHeight,
   mutedTracks, setMutedTracks,
 }) {
   const doc = ed.doc;
@@ -282,6 +355,16 @@ export default function Timeline({
   // Which sheet a keyframe added right now would belong to. Mid-swipe this is
   // the incoming page, which is also where the validator would put a clip.
   const activePageId = pageAt(doc, time);
+
+  // Whether the razor has anything to cut: an audio item selected, measured,
+  // and with the playhead far enough inside it to leave two real halves.
+  const splittable = useMemo(() => {
+    if (selection?.type !== 'audio') return false;
+    const a = doc.audio.find((x) => x.id === selection.id);
+    return !!a && a.duration != null
+      && time > (a.start || 0) + MIN_AUDIO
+      && time < audioEnd(a) - MIN_AUDIO;
+  }, [doc, selection, time]);
 
   // ── lanes ─────────────────────────────────────────────────────────
   // Clip lanes above audio lanes regardless of the order tracks were added in;
@@ -318,10 +401,13 @@ export default function Timeline({
       pts.push(c.start, c.start + c.duration);
       if (c.erase) pts.push(c.erase.start, c.erase.start + c.erase.duration);
     }
-    doc.audio.forEach((a, i) => {
-      if (skip?.kind === 'audio' && skip.index === i) return;
-      pts.push(a.start || 0);
-    });
+    // Both edges, not just the start: with lanes kept gapless, the edge a
+    // neighbour wants to butt up against is exactly where the overlap clamp
+    // would put it anyway.
+    for (const a of doc.audio) {
+      if (skip?.kind === 'audio' && skip.id === a.id) continue;
+      pts.push(a.start || 0, audioEnd(a));
+    }
     // Both edges of every transition. Clips want to butt up against these more
     // than against anything else: a draw must begin after the swipe lands.
     doc.pageBreaks.forEach((b, i) => {
@@ -358,7 +444,8 @@ export default function Timeline({
     // tracking, which must not abort the drag setup below.
     try { e.currentTarget.setPointerCapture?.(e.pointerId); } catch { /* not fatal */ }
     const clip = target.kind === 'clip' ? doc.clips.find((c) => c.id === target.id) : null;
-    const item = clip || (target.kind === 'audio' ? doc.audio[target.index] : null);
+    const audio = target.kind === 'audio' ? doc.audio.find((a) => a.id === target.id) : null;
+    const item = clip || audio;
     const base = clip
       ? { start: clip.start, duration: clip.duration, erase: clip.erase }
       : target.kind === 'pageBreak'
@@ -368,7 +455,14 @@ export default function Timeline({
             start: doc.pages.find((p) => p.id === target.pageId)
               ?.cameraKeyframes[target.index]?.t ?? 0,
           }
-          : { start: doc.audio[target.index]?.start || 0 };
+          // Trimming needs all four: the left grip moves the start and the
+          // in-point together, and how far the in-point moves depends on speed.
+          : {
+            start: audio?.start || 0,
+            duration: audio?.duration,
+            trimIn: audio?.trimIn || 0,
+            speed: audio?.speed || 1,
+          };
     dragRef.current = {
       ...target,
       x0: e.clientX,
@@ -420,10 +514,52 @@ export default function Timeline({
       }
 
       if (d.kind === 'audio') {
-        ed.patchAudio(d.index, {
-          start: Math.max(0, snap(d.base.start + dt, skip)),
-          ...lane,
-        }, opts);
+        const b = d.base;
+        if (d.edge === 'move') {
+          // No clamping here: patchAudio runs the result through audioSlot,
+          // which slides the whole block clear of its neighbours. trimIn is
+          // untouched by a move, so relocating it is always safe.
+          ed.patchAudio(d.id, {
+            start: Math.max(0, snap(b.start + dt, skip)),
+            ...lane,
+          }, opts);
+          return;
+        }
+
+        // The trim edges are clamped here instead, against the neighbours
+        // directly. audioSlot would happily relocate the block to make room --
+        // correct for a move, wrong for a trim, where `start` and `trimIn` have
+        // to move by the same amount or the waveform slides under the window.
+        const { prevEnd, nextStart } = audioNeighbours(doc, d.id);
+        if (d.edge === 'start') {
+          // Left grip: the in-point follows the edge, in *source* seconds.
+          const floor = Math.max(prevEnd, b.start - b.trimIn / b.speed);
+          const ceiling = b.duration != null
+            ? b.start + b.duration - MIN_AUDIO
+            : Infinity;
+          // `snap` already lands on a tenth or on a neighbour's exact edge; the
+          // clamps below can only tighten it, so nothing is re-rounded here.
+          // The right edge is held fixed rather than derived from a rounded
+          // length, so trimming the head never nudges the tail.
+          const start = Math.min(ceiling, Math.max(floor, snap(b.start + dt, skip)));
+          ed.patchAudio(d.id, {
+            start: round3(start),
+            trimIn: round3(b.trimIn + (start - b.start) * b.speed),
+            ...(b.duration == null
+              ? {}
+              : { duration: round3(b.start + b.duration - start) }),
+          }, opts);
+        } else if (d.edge === 'end') {
+          // Right grip: length only. The recording itself is the other stop --
+          // dragging past its last sample would only add silence.
+          const srcLen = mediaBySrc?.[doc.audio.find((a) => a.id === d.id)?.src]?.duration;
+          const maxLen = srcLen != null
+            ? Math.max(MIN_AUDIO, (srcLen - b.trimIn) / b.speed)
+            : Infinity;
+          const end = Math.min(nextStart, snap(b.start + (b.duration ?? 0) + dt, skip));
+          const duration = Math.min(maxLen, Math.max(MIN_AUDIO, end - b.start));
+          ed.patchAudio(d.id, { duration: round3(duration) }, opts);
+        }
         return;
       }
 
@@ -476,7 +612,7 @@ export default function Timeline({
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
     };
-  }, [ed, doc, pxPerSec, snap]);
+  }, [ed, doc, pxPerSec, snap, mediaBySrc]);
 
   // ── scrubbing ─────────────────────────────────────────────────────
   const scrubbing = useRef(false);
@@ -573,9 +709,21 @@ export default function Timeline({
                   onClick={() => ed.addTrack('audio')}>
             <Icon d={PATH.plus} /> Audio
           </button>
+          {/* Razor. Only ever cuts audio -- a drawing has strokes in progress
+              at any interior instant and splitting one would need a rule for
+              what happens to the pen, which is a different feature. */}
+          <button className="btn quiet icon" title="Split audio at the playhead (S)"
+                  disabled={!splittable}
+                  onClick={() => ed.splitAudio(selection.id, time)}>
+            <Icon d={PATH.cut} />
+          </button>
           <button className="btn quiet icon" title="Delete selected clip (Del)"
-                  disabled={selection?.type !== 'clip'}
-                  onClick={() => { ed.removeClip(selection.id); setSelection(null); }}>
+                  disabled={selection?.type !== 'clip' && selection?.type !== 'audio'}
+                  onClick={() => {
+                    if (selection.type === 'clip') ed.removeClip(selection.id);
+                    else ed.removeAudio(selection.id);
+                    setSelection(null);
+                  }}>
             <Icon d={PATH.trash} />
           </button>
           <span style={{ color: 'var(--text-faint)' }}>Zoom</span>
@@ -695,16 +843,24 @@ export default function Timeline({
                     );
                   })}
 
-                  {audio.map(({ a, i }) => (
+                  {laneGaps(audio).map((g) => (
+                    <Gap
+                      key={`gap${g.start}`}
+                      left={g.start * pxPerSec}
+                      width={(g.end - g.start) * pxPerSec}
+                      onClose={() => ed.closeAudioGap(track.id, (g.start + g.end) / 2)}
+                    />
+                  ))}
+
+                  {audio.map(({ a }) => (
                     <AudioClip
-                      key={`a${i}`}
+                      key={a.id}
                       track={a}
-                      index={i}
-                      peaks={peaksBySrc[a.src]}
+                      peaks={mediaBySrc?.[a.src]?.peaks}
                       pxPerSec={pxPerSec}
                       duration={a.duration || 4}
-                      selected={selection?.type === 'audio' && selection.index === i}
-                      onSelect={() => setSelection({ type: 'audio', index: i })}
+                      selected={selection?.type === 'audio' && selection.id === a.id}
+                      onSelect={() => setSelection({ type: 'audio', id: a.id })}
                       onDrag={onDrag}
                     />
                   ))}

@@ -200,16 +200,31 @@ export function useEditor() {
       edit((doc) => edits.removeClipFrom(doc, id), { structural: true });
     },
 
+    // ── audio ─────────────────────────────────────────────────────────
+    // None of these re-prepare: audio is never compiled, and the preview graph
+    // is rebuilt from the document on the next play either way. `ref` is an id
+    // or an index; the UI passes ids, because a split renumbers indices.
+
     addAudio(track) {
-      edit((doc) => edits.addAudio(doc, track));
+      edit(guard((doc) => edits.addAudio(doc, track)));
     },
 
-    patchAudio(index, patch, opts = {}) {
-      edit((doc) => edits.patchAudio(doc, index, patch), opts);
+    patchAudio(ref, patch, opts = {}) {
+      edit(guard((doc) => edits.patchAudio(doc, ref, patch)), opts);
     },
 
-    removeAudio(index) {
-      edit((doc) => edits.removeAudio(doc, index));
+    removeAudio(ref) {
+      edit(guard((doc) => edits.removeAudio(doc, ref)));
+    },
+
+    /** Cut an item in two at the playhead. Refuses outside the item. */
+    splitAudio(ref, t) {
+      edit(guard((doc) => edits.splitAudio(doc, ref, t)));
+    },
+
+    /** Pull a lane's later items back over the silence at `t`. */
+    closeAudioGap(trackId, t) {
+      edit(guard((doc) => edits.closeAudioGap(doc, trackId, t)));
     },
 
     // ── tracks ────────────────────────────────────────────────────────

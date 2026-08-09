@@ -1,5 +1,6 @@
 import React from 'react';
 import { ANIMATIONS_FOR_KIND, pageAt, pageWindows } from '../../engine/model/project.js';
+import { MIN_AUDIO } from '../../engine/model/edits.js';
 import { cameraAt } from '../../engine/render/renderFrame.js';
 import { localToWorld } from '../stageGeom.js';
 import { Field, Group, Icon, Num, PATH, Soon } from './common.jsx';
@@ -269,29 +270,113 @@ function ClipInspector({ ed, clip, asset, fonts, frame, fps, selection, bboxes }
   );
 }
 
-function AudioInspector({ ed, index, track }) {
+/** Speeds worth one click. 1 is in the list so there is a way back to it. */
+const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
+
+/**
+ * The speed slider is logarithmic, so 1x sits at the centre of the track.
+ *
+ * Linear over 0.25..4 would put unmodified audio a fifth of the way along and
+ * give three quarters of the travel to speeding up, which is backwards: halving
+ * and doubling are equally large edits and deserve equal room.
+ */
+const SPEED_MIN = 0.25;
+const SPEED_MAX = 4;
+const speedToPos = (s) => (Math.log2(s) - Math.log2(SPEED_MIN))
+  / (Math.log2(SPEED_MAX) - Math.log2(SPEED_MIN));
+const posToSpeed = (p) => {
+  // A detent at the midpoint: getting back to unmodified audio must not be a
+  // matter of hitting one pixel.
+  if (Math.abs(p - 0.5) < 0.02) return 1;
+  const raw = 2 ** (Math.log2(SPEED_MIN)
+    + p * (Math.log2(SPEED_MAX) - Math.log2(SPEED_MIN)));
+  return Math.round(raw * 100) / 100;
+};
+
+function AudioInspector({ ed, track, frame, fps, srcDuration, onSplit }) {
+  const index = ed.doc.audio.findIndex((a) => a.id === track.id);
+  const t = frame / fps;
+  const start = track.start ?? 0;
+  const speed = track.speed ?? 1;
+  const end = start + (track.duration ?? 0);
+  // A cut needs a real half on each side, and a length to cut: an item ffprobe
+  // could not measure has no end to speak of.
+  const canSplit = track.duration != null && t > start + MIN_AUDIO && t < end - MIN_AUDIO;
+  // Retiming an item slides the narration out from under a transcript that was
+  // timed against it. Worth a word, since nothing else will say so.
+  const timed = ed.doc.subtitles?.words?.length > 0;
+  // One entry point for all three speed controls, so they cannot drift apart --
+  // and so the length rescale and the lane ripple happen exactly once each.
+  const setSpeed = (v, opts) => ed.patchAudio(track.id, { speed: v }, opts);
+
   return (
     <Group title="Audio track" right={<span className="pill">#{index + 1}</span>}>
       <div className="hint" title={track.src}>{track.src.split('/').pop()}</div>
       <TrackField tracks={ed.doc.tracks} kind="audio" value={track.trackId}
-        onChange={(trackId) => ed.patchAudio(index, { trackId })} />
+        onChange={(trackId) => ed.patchAudio(track.id, { trackId })} />
       <div className="pair">
-        <Field label="Start"><Num value={track.start ?? 0} step={0.1} min={0}
-          onChange={(start) => ed.patchAudio(index, { start })} /></Field>
+        <Field label="Start"><Num value={start} step={0.1} min={0}
+          onChange={(v) => ed.patchAudio(track.id, { start: v })} /></Field>
+        <Field label="Length"><Num value={track.duration ?? 0} step={0.1} min={0.1}
+          max={srcDuration != null
+            ? Math.max(0.1, (srcDuration - (track.trimIn ?? 0)) / speed)
+            : undefined}
+          onChange={(v) => ed.patchAudio(track.id, { duration: v })} /></Field>
+      </div>
+      <div className="pair">
         <Field label="Trim in"><Num value={track.trimIn ?? 0} step={0.1} min={0}
-          onChange={(trimIn) => ed.patchAudio(index, { trimIn })} /></Field>
+          max={srcDuration != null ? Math.max(0, srcDuration - 0.1) : undefined}
+          onChange={(v) => ed.patchAudio(track.id, { trimIn: v })} /></Field>
+        <Field label="Speed"><Num value={speed} step={0.05} min={SPEED_MIN} max={SPEED_MAX}
+          suffix="×" onChange={(v) => setSpeed(v)} /></Field>
+      </div>
+      {/* Bare, not in a Field: it belongs to the Speed number field directly
+          above it, and a second "Speed" label would just repeat itself. */}
+      <input
+        type="range" min={0} max={1} step={0.005} value={speedToPos(speed)}
+        style={{ '--fill': `${speedToPos(speed) * 100}%` }}
+        title={`${speed}× — pitch is preserved`}
+        // Coalesced, so a drag is one undo step rather than the fifty edits a
+        // range input emits. Each of these also ripples the lane, which makes
+        // fifty entries actively confusing to step back through.
+        onChange={(e) => setSpeed(posToSpeed(Number(e.target.value)),
+          { coalesce: `speed:${track.id}` })}
+        onPointerUp={() => ed.endGesture()}
+        onBlur={() => ed.endGesture()}
+      />
+      <div className="chips">
+        {SPEEDS.map((s) => (
+          <button key={s} className={`chip${Math.abs(speed - s) < 1e-6 ? ' on' : ''}`}
+                  onClick={() => setSpeed(s)}>
+            {s}×
+          </button>
+        ))}
       </div>
       <Field label="Gain">
         <input type="range" min={0} max={2} step={0.05} value={track.gain ?? 1}
                style={{ '--fill': `${((track.gain ?? 1) / 2) * 100}%` }}
-               onChange={(e) => ed.patchAudio(index, { gain: Number(e.target.value) })} />
+               onChange={(e) => ed.patchAudio(track.id, { gain: Number(e.target.value) })} />
       </Field>
+      <button className="btn wide" disabled={!canSplit} onClick={onSplit}
+              title={canSplit ? 'Cut this item in two at the playhead (S)'
+                              : 'Put the playhead inside this item to cut it'}>
+        <Icon d={PATH.cut} /> Split at playhead
+      </button>
       <div className="hint">
         Preview mixes these live through WebAudio and export mixes them in
-        ffmpeg, but both read the same four fields — start, trim, length, gain —
-        so what you hear while scrubbing is what lands in the MP4.
+        ffmpeg, and both read the same fields, so what you hear while scrubbing
+        lands in the MP4. Speed preserves pitch in both — a faster take is the
+        same voice hurrying, not a higher one. Changing it resizes the block to
+        hold the same audio and slides the rest of the lane to match.
       </div>
-      <button className="btn danger wide" onClick={() => ed.removeAudio(index)}>
+      {timed && (
+        <div className="hint warn">
+          This project has a transcript. Subtitles are timed against the
+          composition, not against this item, so moving, trimming or retiming it
+          will drift them — re-run the transcription afterwards.
+        </div>
+      )}
+      <button className="btn danger wide" onClick={() => ed.removeAudio(track.id)}>
         <Icon d={PATH.trash} /> Remove track
       </button>
     </Group>
@@ -565,11 +650,13 @@ function ProjectInspector({ ed, hands, frame, fps, selection, bboxes, transcribe
 }
 
 export default function Inspector({ ed, selection, hands, fonts, frame, fps, bboxes,
-  transcribe, transcribing }) {
+  mediaBySrc, onSplitAudio, transcribe, transcribing }) {
   const clip = selection?.type === 'clip'
     ? ed.doc.clips.find((c) => c.id === selection.id)
     : null;
-  const track = selection?.type === 'audio' ? ed.doc.audio[selection.index] : null;
+  const track = selection?.type === 'audio'
+    ? ed.doc.audio.find((a) => a.id === selection.id)
+    : null;
   const brk = selection?.type === 'pageBreak' ? ed.doc.pageBreaks[selection.index] : null;
   const key = selection?.type === 'camera' ? selection : null;
 
@@ -586,7 +673,9 @@ export default function Inspector({ ed, selection, hands, fonts, frame, fps, bbo
           {clip && <ClipInspector ed={ed} clip={clip} asset={ed.doc.assets[clip.assetId]}
                                   fonts={fonts} frame={frame} fps={fps}
                                   selection={selection} bboxes={bboxes} />}
-          {track && <AudioInspector ed={ed} index={selection.index} track={track} />}
+          {track && <AudioInspector ed={ed} track={track} frame={frame} fps={fps}
+                                    srcDuration={mediaBySrc?.[track.src]?.duration}
+                                    onSplit={onSplitAudio} />}
           {brk && <PageBreakInspector ed={ed} index={selection.index} brk={brk} />}
           {key && <CameraInspector ed={ed} pageId={key.pageId} index={key.index} />}
           {!clip && !track && !brk && !key
