@@ -24,8 +24,29 @@ test('defaults fill in for an otherwise minimal project', () => {
   assert.equal(p.meta.height, 1080);
   assert.equal(p.pages.length, 1, 'a default page is synthesised');
   assert.deepEqual(p.pages[0].cameraKeyframes, [{ t: 0, x: 0, y: 0, zoom: 1 }]);
-  assert.deepEqual(p.clips[0].transform, { x: 0, y: 0, scale: 1, rotation: 0 });
+  assert.deepEqual(p.clips[0].transform,
+    { x: 0, y: 0, scale: 1, scaleX: 1, scaleY: 1, rotation: 0 });
   assert.equal(p.clips[0].id, 'clip1', 'ids are generated when omitted');
+});
+
+test('a transform is validated rather than spread raw', () => {
+  // It used to be copied through untouched, so a string reached the renderer
+  // and produced NaN geometry -- an empty frame with no error anywhere.
+  const withTransform = (t) => {
+    const p = minimal();
+    p.clips[0].transform = t;
+    return () => normalizeProject(p);
+  };
+  assert.throws(withTransform({ scale: '2' }), /expected a number/);
+  assert.throws(withTransform({ x: NaN }), /expected a number/);
+  assert.throws(withTransform({ scale: 0 }), /must be between/);
+  // Zero on an axis is a singular matrix, not a very small clip: it would take
+  // hit-testing and the pen's inverse mapping down with it.
+  assert.throws(withTransform({ scaleX: 0 }), /must not be zero/);
+  // A mirror is a negative stretch, so the sign itself is legal.
+  assert.equal(normalizeProject(
+    (() => { const p = minimal(); p.clips[0].transform = { scaleX: -1 }; return p; })(),
+  ).clips[0].transform.scaleX, -1);
 });
 
 test('normalize does not mutate its input', () => {

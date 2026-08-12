@@ -34,6 +34,14 @@ paper, one sheet at a time, and a camera can move over the sheet.
    of its ink at the middle of the frame.
 2. **World (0,0) is the centre of the frame only while the camera is at the
    identity.** After a zoom or a pan, a clip placed at (0,0) is off screen.
+3. **\`rotation\` is in degrees, and turns about that same corner.** A clip
+   given a rotation without a compensating \`x\`/\`y\` swings away from where it
+   was, so set it when you place the clip rather than as an afterthought.
+4. **\`scaleX\`/\`scaleY\` multiply \`scale\`, one axis each.** 1 keeps the
+   artwork's proportions, 0.6 squeezes it, and a *negative* value mirrors that
+   axis -- an arrow drawn pointing right becomes one pointing left with
+   \`scaleX: -1\`, with no second asset to import. Squeezing changes the pen's
+   stroke width, so it recompiles the clip; mirroring does not.
 
 \`add_clip\` and \`storyboard\` place clips for you when you do not pass a
 transform — they compile the clip, measure it, and fit it to the frame. Prefer

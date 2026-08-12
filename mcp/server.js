@@ -201,6 +201,25 @@ const eraseSchema = z.object({
   duration: z.number().min(0.01).default(1.5),
 }).describe('wipe the ink away; must begin after the clip finishes drawing');
 
+/**
+ * Where a clip sits on the page.
+ *
+ * `x`/`y` place the drawable's bounding-box *corner*, `scale` sizes it, and the
+ * two stretches multiply that scale per axis -- so 1 keeps the artwork's own
+ * proportions, 0.6 squeezes it, and a negative value mirrors it.
+ */
+const transformSchema = z.object({
+  x: z.number().optional(), y: z.number().optional(),
+  scale: z.number().positive().optional()
+    .describe('overall size; 1 is the drawable\'s own units'),
+  scaleX: z.number().optional()
+    .describe('horizontal stretch, a multiple of scale; negative mirrors left-to-right'),
+  scaleY: z.number().optional()
+    .describe('vertical stretch, a multiple of scale; negative mirrors top-to-bottom'),
+  rotation: z.number().optional()
+    .describe('degrees clockwise, turning about the bounding-box corner'),
+});
+
 server.registerTool('add_clip', {
   title: 'Add clip',
   description:
@@ -220,10 +239,7 @@ server.registerTool('add_clip', {
     bold: z.boolean().optional().describe('for kind=text'),
     animId: z.string().optional(),
     duration: z.number().min(0.01).optional(),
-    transform: z.object({
-      x: z.number().optional(), y: z.number().optional(),
-      scale: z.number().positive().optional(), rotation: z.number().optional(),
-    }).optional(),
+    transform: transformSchema.optional(),
     params: z.record(z.string(), z.any()).optional(),
   },
 }, tool(async ({ name, kind, text, src, font, fontSize, penWidth, color, bold, ...rest }) => {
@@ -259,10 +275,7 @@ server.registerTool('update_clip', {
     pageId: z.string().optional(),
     trackId: z.string().optional(),
     animId: z.string().optional(),
-    transform: z.object({
-      x: z.number().optional(), y: z.number().optional(),
-      scale: z.number().positive().optional(), rotation: z.number().optional(),
-    }).optional(),
+    transform: transformSchema.optional(),
     params: z.record(z.string(), z.any()).optional(),
     erase: eraseSchema.nullable().optional(),
   },

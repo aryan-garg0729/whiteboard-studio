@@ -10,7 +10,8 @@
 
 import React, { useCallback, useEffect, useRef } from 'react';
 import {
-  CORNERS, hitTest, resizeTransform, screenToWorld, worldPerPixel,
+  HANDLES, handleAnchors, hitTest, resizeTransform, rotateTransform,
+  screenToWorld, worldPerPixel,
 } from '../stageGeom.js';
 
 /** Zoom the wheel may reach directly. Beyond this, type it in the inspector. */
@@ -20,6 +21,14 @@ const CAM_ZOOM = [0.1, 20];
 const WHEEL_K = 0.0015;
 
 const clampZoom = (z) => Math.min(CAM_ZOOM[1], Math.max(CAM_ZOOM[0], z));
+
+/**
+ * Round a transform field before it lands in the document.
+ *
+ * Three places is finer than a pixel at any zoom the stage offers, and it keeps
+ * a saved project readable instead of full of 0.7999999999999999.
+ */
+const round3 = (v) => Math.round(v * 1000) / 1000;
 
 export default function StageOverlay({
   ed, meta, cam, fit, boxes, camera, pageId, time, selection, setSelection, onDropAsset,
@@ -32,14 +41,14 @@ export default function StageOverlay({
     return { x: e.clientX - r.left, y: e.clientY - r.top };
   }, []);
 
-  const begin = useCallback((e, mode, id, corner) => {
+  const begin = useCallback((e, mode, id, handle) => {
     e.preventDefault();
     e.stopPropagation();
     const clip = ed.doc.clips.find((c) => c.id === id);
     if (!clip) return;
     const p = at(e);
     dragRef.current = {
-      mode, id, corner,
+      mode, id, handle,
       // Bind the gesture to the pointer that started it. Resizing changes the
       // layout under the cursor, and Chromium answers a layout change with a
       // synthetic pointermove at the *real* cursor position -- which feeds
@@ -50,7 +59,7 @@ export default function StageOverlay({
       base: { ...clip.transform },
       bbox: boxes.find((b) => b.id === id)?.bbox,
       // One tag for the whole gesture, so a drag is a single undo step.
-      tag: `stage:${id}:${mode}${corner || ''}`,
+      tag: `stage:${id}:${mode}${handle || ''}`,
     };
   }, [ed.doc.clips, boxes, at]);
 
@@ -96,15 +105,23 @@ export default function StageOverlay({
           y: Math.round(d.base.y + (p.y - d.start.y) * k),
         },
       }, { coalesce: d.tag });
-    } else if (d.mode === 'resize' && d.bbox) {
+    } else if ((d.mode === 'resize' || d.mode === 'rotate') && d.bbox) {
       const w = screenToWorld(meta, cam, fit, p.x, p.y);
-      const next = resizeTransform(d.base, d.bbox, d.corner, w.x, w.y);
+      // Modifiers are read live rather than from the pointerdown: a person
+      // reaches for shift *after* starting the drag, once they can see what the
+      // unconstrained version is doing.
+      const next = d.mode === 'rotate'
+        ? rotateTransform(d.base, d.bbox, w.x, w.y, { snap: e.shiftKey })
+        : resizeTransform(d.base, d.bbox, d.handle, w.x, w.y, { free: e.shiftKey });
       ed.patchClip(d.id, {
         transform: {
           ...d.base,
           x: Math.round(next.x),
           y: Math.round(next.y),
-          scale: Math.round(next.scale * 1000) / 1000,
+          scale: round3(next.scale),
+          scaleX: round3(next.scaleX),
+          scaleY: round3(next.scaleY),
+          rotation: round3(next.rotation),
         },
       }, { coalesce: d.tag });
     }
@@ -190,6 +207,7 @@ export default function StageOverlay({
   const selected = !camera && selection?.type === 'clip'
     ? boxes.find((b) => b.id === selection.id)
     : null;
+  const anchors = selected ? handleAnchors(selected.corners) : null;
 
   return (
     <div
@@ -206,26 +224,42 @@ export default function StageOverlay({
         onDropAsset(JSON.parse(raw), screenToWorld(meta, cam, fit, p.x, p.y));
       }}
     >
-      {/* Faint outline on every clip so the user can see what is grabbable. */}
-      {!camera && boxes.map((b) => (
-        <div
-          key={b.id}
-          className={`stage-box${selected?.id === b.id ? ' sel' : ''}`}
-          style={b.rect}
-        />
-      ))}
+      {/* Faint outline on every clip so the user can see what is grabbable.
+          An SVG polygon rather than a CSS box: once a clip can be rotated, a
+          rectangle is no longer the shape of anything on screen. */}
+      {!camera && boxes.length > 0 && (
+        <svg className="stage-outlines" width="100%" height="100%">
+          {boxes.map((b) => (
+            <polygon
+              key={b.id}
+              className={`stage-box${selected?.id === b.id ? ' sel' : ''}`}
+              points={b.corners.map((p) => `${p.x},${p.y}`).join(' ')}
+            />
+          ))}
+        </svg>
+      )}
 
-      {selected && CORNERS.map((corner) => (
-        <div
-          key={corner}
-          className={`stage-handle ${corner}`}
-          style={{
-            left: selected.rect.left + (corner === 'ne' || corner === 'se' ? selected.rect.width : 0),
-            top: selected.rect.top + (corner === 'se' || corner === 'sw' ? selected.rect.height : 0),
-          }}
-          onPointerDown={(e) => begin(e, 'resize', selected.id, corner)}
-        />
-      ))}
+      {anchors && (
+        <>
+          <div
+            className="stage-handle rot"
+            style={{ left: anchors.rot.x, top: anchors.rot.y }}
+            title="Drag to rotate; hold Shift to snap to 15°"
+            onPointerDown={(e) => begin(e, 'rotate', selected.id)}
+          />
+          {HANDLES.map((h) => (
+            <div
+              key={h}
+              className={`stage-handle ${h}`}
+              style={{ left: anchors[h].x, top: anchors[h].y }}
+              title={h.length === 2
+                ? 'Drag to resize; hold Shift to stretch both axes freely'
+                : 'Drag to squeeze this axis; drag past the far edge to flip'}
+              onPointerDown={(e) => begin(e, 'resize', selected.id, h)}
+            />
+          ))}
+        </>
+      )}
     </div>
   );
 }

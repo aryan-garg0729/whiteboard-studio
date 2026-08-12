@@ -2,7 +2,7 @@ import React from 'react';
 import { ANIMATIONS_FOR_KIND, pageAt, pageWindows } from '../../engine/model/project.js';
 import { MIN_AUDIO } from '../../engine/model/edits.js';
 import { cameraAt } from '../../engine/render/renderFrame.js';
-import { localToWorld } from '../stageGeom.js';
+import { aroundCentre, transformCorners } from '../stageGeom.js';
 import { Field, Group, Icon, Num, PATH, Soon } from './common.jsx';
 import FontPicker from './FontPicker.jsx';
 import { getAnimation } from '../../engine/anim/registry.js';
@@ -98,10 +98,24 @@ function TrackField({ tracks, kind, value, onChange }) {
   );
 }
 
+/** A quarter turn, kept in (-180, 180] so the field never reads 450°. */
+const quarter = (t, by) => ((((t.rotation ?? 0) + by + 180) % 360) + 360) % 360 - 180;
+
 function ClipInspector({ ed, clip, asset, fonts, frame, fps, selection, bboxes }) {
   const t = clip.transform || {};
   const erase = clip.erase;
   const drawEnd = clip.start + clip.duration;
+
+  /**
+   * Edit the placement about the drawable's centre.
+   *
+   * The matrix pivots on the origin corner, so a bare `rotation: 90` would send
+   * the artwork somewhere else on the page. `aroundCentre` re-solves the origin
+   * so it turns, squeezes and mirrors in place -- matching what the stage
+   * handles do, since they hold their anchor still for the same reason.
+   */
+  const set = (patch) => ed.patchTransform(
+    clip.id, aroundCentre(t, bboxes?.get(clip.id), patch));
 
   return (
     <>
@@ -169,9 +183,31 @@ function ClipInspector({ ed, clip, asset, fonts, frame, fps, selection, bboxes }
         </div>
         <div className="pair">
           <Field label="Scale"><Num value={t.scale ?? 1} step={0.05} min={0.01}
-            onChange={(scale) => ed.patchTransform(clip.id, { scale })} /></Field>
-          <Field label="Rotate"><Num value={t.rotation ?? 0} step={5}
-            onChange={(rotation) => ed.patchTransform(clip.id, { rotation })} /></Field>
+            onChange={(scale) => set({ scale })} /></Field>
+          <Field label="Rotate°"><Num value={t.rotation ?? 0} step={5}
+            onChange={(rotation) => set({ rotation })} /></Field>
+        </div>
+        {/* Stretch is a multiple of Scale, not a size: 1 is the artwork's own
+            proportions, and a negative value mirrors that axis. Flip and
+            squeeze are one field, which is what lets a handle dragged past its
+            far edge do both. */}
+        <div className="pair">
+          <Field label="Stretch X"><Num value={t.scaleX ?? 1} step={0.05}
+            onChange={(scaleX) => set({ scaleX })} /></Field>
+          <Field label="Stretch Y"><Num value={t.scaleY ?? 1} step={0.05}
+            onChange={(scaleY) => set({ scaleY })} /></Field>
+        </div>
+        <div className="chips">
+          <button className="chip" title="Mirror left to right"
+                  onClick={() => set({ scaleX: -(t.scaleX ?? 1) })}>Flip H</button>
+          <button className="chip" title="Mirror top to bottom"
+                  onClick={() => set({ scaleY: -(t.scaleY ?? 1) })}>Flip V</button>
+          <button className="chip" title="Quarter turn anticlockwise"
+                  onClick={() => set({ rotation: quarter(t, -90) })}>↺ 90°</button>
+          <button className="chip" title="Quarter turn clockwise"
+                  onClick={() => set({ rotation: quarter(t, 90) })}>↻ 90°</button>
+          <button className="chip" title="Back to the artwork's own proportions"
+                  onClick={() => set({ scaleX: 1, scaleY: 1, rotation: 0 })}>Reset</button>
         </div>
       </Group>
 
@@ -477,10 +513,15 @@ function CameraGroup({ ed, frame, fps, selection, bboxes }) {
 
   const frameClip = () => {
     const tr = clip.transform || { x: 0, y: 0, scale: 1 };
-    const a = localToWorld(tr, bbox[0], bbox[1]);
-    const b = localToWorld(tr, bbox[2], bbox[3]);
-    const w = Math.abs(b.x - a.x) * FRAME_MARGIN;
-    const h = Math.abs(b.y - a.y) * FRAME_MARGIN;
+    // All four corners, not two: a rotated clip's extent is the hull of its
+    // quad, and framing the diagonal of the untilted box crops it.
+    const pts = transformCorners(bbox, tr);
+    const xs = pts.map((p) => p.x);
+    const ys = pts.map((p) => p.y);
+    const a = { x: Math.min(...xs), y: Math.min(...ys) };
+    const b = { x: Math.max(...xs), y: Math.max(...ys) };
+    const w = (b.x - a.x) * FRAME_MARGIN;
+    const h = (b.y - a.y) * FRAME_MARGIN;
     // renderPage maps world to canvas as `size/2 + (world - cam) * zoom`, so a
     // world span of `w` covers `w * zoom` pixels. Fit whichever axis is tighter.
     const zoom = Math.min(100, Math.max(0.01,

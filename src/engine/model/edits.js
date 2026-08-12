@@ -26,6 +26,7 @@
  */
 
 import { DEFAULTS, pageAt } from './project.js';
+import { boundsOf, transformCorners } from './transform.js';
 import { cameraAt } from '../render/renderFrame.js';
 
 /**
@@ -232,7 +233,7 @@ export function addClipTo(doc, asset, { animId, duration = 3, transform, clipId:
       trackId,
       start,
       duration,
-      transform: { x: 0, y: 0, scale: 1, rotation: 0, ...transform },
+      transform: { ...DEFAULTS.transform, ...transform },
       params: {},
     }],
   };
@@ -844,15 +845,15 @@ export function placeInFrame(bbox, cam, meta, fill = 0.8, grow = false) {
   };
 }
 
-/** A clip's bbox in world space: its local bbox under its own transform. */
+/**
+ * A clip's bbox in world space: its local bbox under its own transform.
+ *
+ * The axis-aligned hull of the four transformed corners, so it stays honest for
+ * a rotated or mirrored clip. It feeds the MCP report's `offscreen` and
+ * `overlaps` warnings, which are the only view a headless author has of where
+ * anything ended up -- computing it from two corners and a uniform scale made
+ * those warnings quietly wrong for anything tilted.
+ */
 export function worldRect(bbox, transform) {
-  const s = transform.scale ?? 1;
-  const x = transform.x ?? 0;
-  const y = transform.y ?? 0;
-  return {
-    x: x + bbox[0] * s,
-    y: y + bbox[1] * s,
-    width: Math.abs(bbox[2] - bbox[0]) * s,
-    height: Math.abs(bbox[3] - bbox[1]) * s,
-  };
+  return boundsOf(transformCorners(bbox, transform));
 }

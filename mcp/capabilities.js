@@ -163,11 +163,15 @@ export function checkParams(animId, params) {
   return { params: out, notes };
 }
 
+/** Placement fields a caller may set, in the order they read best. */
+export const TRANSFORM_FIELDS = ['x', 'y', 'scale', 'scaleX', 'scaleY', 'rotation'];
+
 /**
  * A transform must be finite numbers.
  *
- * `normalizeProject` spreads `transform` raw, so a string here reaches the
- * renderer and produces NaN geometry -- an empty frame with no error anywhere.
+ * Caught here as well as in `normalizeProject`, so a bad argument is refused at
+ * the tool boundary -- with the argument name in the message -- instead of
+ * surfacing later as a whole project that will not load.
  */
 export function checkTransform(transform) {
   if (transform === undefined) return undefined;
@@ -176,15 +180,21 @@ export function checkTransform(transform) {
   }
   const out = {};
   for (const [key, value] of Object.entries(transform)) {
-    if (!['x', 'y', 'scale', 'rotation'].includes(key)) {
+    if (!TRANSFORM_FIELDS.includes(key)) {
       throw new InvalidInput(`transform has no field ${JSON.stringify(key)}; `
-        + 'it takes x, y, scale, rotation');
+        + `it takes ${TRANSFORM_FIELDS.join(', ')}`);
     }
     if (typeof value !== 'number' || !Number.isFinite(value)) {
       throw new InvalidInput(`transform.${key} must be a finite number, got ${JSON.stringify(value)}`);
     }
     if (key === 'scale' && value <= 0) {
       throw new InvalidInput(`transform.scale must be positive, got ${value}`);
+    }
+    // A mirror is a negative stretch, so these may be either sign -- but zero
+    // is a singular matrix, not a very small clip.
+    if ((key === 'scaleX' || key === 'scaleY') && value === 0) {
+      throw new InvalidInput(`transform.${key} must not be zero`
+        + ' (use a negative value to mirror that axis)');
     }
     out[key] = value;
   }

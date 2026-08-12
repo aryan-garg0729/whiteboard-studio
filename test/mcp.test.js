@@ -196,6 +196,19 @@ test('worldRect composes a local bbox with a clip transform', () => {
   assert.deepEqual(r, { x: 10, y: -20, width: 200, height: 100 });
 });
 
+test('worldRect reports where a rotated or mirrored clip actually is', () => {
+  // A quarter turn swaps the extents, and about the origin corner it also puts
+  // the artwork somewhere else. Reporting the untilted box here would make the
+  // MCP report's "offscreen" warning quietly wrong.
+  const turned = edits.worldRect([0, 0, 100, 50], { x: 0, y: 0, scale: 1, rotation: 90 });
+  for (const [k, want] of Object.entries({ x: -50, y: 0, width: 50, height: 100 })) {
+    assert.ok(Math.abs(turned[k] - want) < 1e-9, `${k}: ${turned[k]} !== ${want}`);
+  }
+
+  const mirrored = edits.worldRect([0, 0, 100, 50], { x: 0, y: 0, scale: 1, scaleX: -1 });
+  assert.deepEqual(mirrored, { x: -100, y: 0, width: 100, height: 50 });
+});
+
 // ── the studio ────────────────────────────────────────────────────────
 
 test('a new project is valid, saved, and empty', () => {

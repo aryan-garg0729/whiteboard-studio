@@ -18,6 +18,9 @@ import { ClipSurfaces, newSurface } from './surfaces.js';
 import { drawHand } from './drawHand.js';
 import { advanceErase } from '../anim/erase.js';
 import { TRANSITION_DIR, pageStateAt } from '../model/project.js';
+import {
+  DEG, applyTransform, effectiveScale, transformTangent,
+} from '../model/transform.js';
 import { subtitlePlan, drawSubtitles } from './subtitles.js';
 
 /**
@@ -212,8 +215,9 @@ export function renderPage(session, project, pageId, t, ctx, opts) {
     ctx.scale(cam.zoom, cam.zoom);
     ctx.translate(-cam.x, -cam.y);
     ctx.translate(tr.x, tr.y);
-    if (tr.rotation) ctx.rotate(tr.rotation);
-    ctx.scale(tr.scale, tr.scale);
+    if (tr.rotation) ctx.rotate(tr.rotation * DEG);
+    const { sx, sy } = effectiveScale(tr);
+    ctx.scale(sx, sy);
 
     // An entrance -- a fade, a pop, a slide -- is applied here rather than
     // drawn into the surface, because the surface only extends 32px past the
@@ -238,15 +242,20 @@ export function renderPage(session, project, pageId, t, ctx, opts) {
     // whether ink is laid, not whether the hand exists.
     if (pen.active && handLive) {
       // Convert the object-local pen point into screen space by hand, since
-      // the sprite must NOT inherit the camera scale.
-      const wx = tr.x + (pen.x * tr.scale);
-      const wy = tr.y + (pen.y * tr.scale);
+      // the sprite must NOT inherit the camera scale. `applyTransform` is the
+      // same matrix the artwork was just drawn with -- shared rather than
+      // rewritten, because when this block spelled the matrix out itself it
+      // quietly dropped the rotation term and the pen tip drifted off the ink.
+      //
+      // The tangent needs the matrix too: rotation turns it, and a squeeze
+      // turns it by an amount that depends on the direction.
+      const w = applyTransform(tr, pen.x, pen.y);
       handAt = {
         tip: {
-          x: width / 2 + (wx - cam.x) * cam.zoom,
-          y: height / 2 + (wy - cam.y) * cam.zoom,
+          x: width / 2 + (w.x - cam.x) * cam.zoom,
+          y: height / 2 + (w.y - cam.y) * cam.zoom,
         },
-        tangent: pen.tangent,
+        tangent: transformTangent(tr, pen.tangent),
         tool: pen.tool,
       };
     }

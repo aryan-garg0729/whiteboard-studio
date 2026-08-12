@@ -12,6 +12,7 @@ import { compileErase } from '../engine/anim/erase.js';
 import { getAnimation } from '../engine/anim/registry.js';
 import { paintVectorArt } from '../engine/render/vectorArt.js';
 import { imagePixels, vectorPixels } from '../engine/render/rasterize.js';
+import { penScale } from '../engine/model/transform.js';
 // Imported for their registration side effect as much as for their exports:
 // `getAnimation` can only hand back what has been registered.
 import '../engine/anim/stencilPaint.js';
@@ -135,8 +136,9 @@ export async function buildSession(loaded) {
       plan = await getAnimation(clip.animId)
         .compile({ id: clip.assetId, image }, {
           // Pen widths are chosen so the stroke is a constant width *on screen*.
-          // An entrance has no pen and ignores them.
-          fillBrushWidth: Math.max(8, 15 / clip.transform.scale),
+          // An entrance has no pen and ignores them. `penScale` folds in the
+          // per-axis stretch, which `transform.scale` alone does not see.
+          fillBrushWidth: Math.max(8, 15 / penScale(clip.transform)),
           ...clip.params,
         });
       artJobs.push({ clipId: clip.id, vector, decoded });

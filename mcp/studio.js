@@ -28,6 +28,7 @@ import { cameraAt, ensureSurfaces } from '../src/engine/render/renderFrame.js';
 import { normalizeProject, projectDuration, projectFrames } from '../src/engine/model/project.js';
 import { buildNodeSession, compileClip, installNodeSurfaces } from '../src/engine/host/nodeSession.js';
 import * as edits from '../src/engine/model/edits.js';
+import { penScale } from '../src/engine/model/transform.js';
 import { checkAnimForKind, checkParams, checkTransform } from './capabilities.js';
 import { ROOT, loadProject, readablePath, saveProject } from './workspace.js';
 
@@ -239,9 +240,11 @@ export class Studio {
     // The transform feeds the brush width (which is authored in screen terms
     // and divides out the scale), so a rescale does change compiled geometry.
     // Only a rescale, though -- a move must stay timing-class, or dragging a
-    // clip would re-trace its artwork on every step.
+    // clip would re-trace its artwork on every step. Compared through
+    // `penScale` so a squeeze counts and a pure mirror, which changes no
+    // stroke's width, does not.
     const rescaled = out.transform !== undefined
-      && out.transform.scale !== clip.transform.scale;
+      && penScale(out.transform) !== penScale(clip.transform);
     const structural = out.animId !== undefined || out.params !== undefined || rescaled;
 
     this.commit(name, (d) => edits.patchClip(d, id, out), { structural });

@@ -1,0 +1,427 @@
+{
+  "meta": {
+    "version": 1,
+    "name": "",
+    "fps": 30,
+    "width": 1920,
+    "height": 1080,
+    "background": "#fdfdfb",
+    "handStyleId": "hand3",
+    "showHand": true
+  },
+  "assets": {
+    "art1": {
+      "id": "art1",
+      "kind": "image",
+      "src": "/home/aryan/Personal/yt/vid/assets/good/hands_laptop_cutout.png"
+    },
+    "art2": {
+      "id": "art2",
+      "kind": "image",
+      "src": "/home/aryan/Downloads/rgb_mix_final.png"
+    },
+    "art3": {
+      "id": "art3",
+      "kind": "image",
+      "src": "/home/aryan/Downloads/brain_top_cutout.png"
+    },
+    "text1": {
+      "id": "text1",
+      "kind": "text",
+      "text": "You can do the\nexact same\ntrick with almost\nanything",
+      "font": "/home/aryan/Personal/yt/v3/assets/fonts/Poppins.ttf",
+      "fontSize": 120,
+      "penWidth": 5,
+      "color": "#3b076e",
+      "bold": true
+    },
+    "art4": {
+      "id": "art4",
+      "kind": "image",
+      "src": "/home/aryan/Downloads/dashed_box_cutout.png"
+    },
+    "art5": {
+      "id": "art5",
+      "kind": "image",
+      "src": "/home/aryan/Downloads/yellow_sticky_cutout.png"
+    },
+    "text2": {
+      "id": "text2",
+      "kind": "text",
+      "text": "You can make \nsomething ordinary feel\n amazing, or something\n genuinely good feel \ncheap, without changing\n the thing itself at all",
+      "font": "/home/aryan/Personal/yt/v3/assets/fonts/Poppins.ttf",
+      "fontSize": 120,
+      "penWidth": 5,
+      "color": "#ff2424",
+      "bold": true
+    },
+    "art6": {
+      "id": "art6",
+      "kind": "image",
+      "src": "/home/aryan/Downloads/cloud_bubble_grey_cutout.png"
+    },
+    "text3": {
+      "id": "text3",
+      "kind": "text",
+      "text": "REALITY!",
+      "font": "/home/aryan/Personal/yt/v3/assets/fonts/IndieFlower-Regular.ttf",
+      "fontSize": 120,
+      "penWidth": 5,
+      "color": "#000000",
+      "bold": true
+    },
+    "art7": {
+      "id": "art7",
+      "kind": "image",
+      "src": "/home/aryan/Downloads/alchemy_book_cover.jpg"
+    },
+    "text4": {
+      "id": "text4",
+      "kind": "text",
+      "text": "INTERVENTION",
+      "font": "/home/aryan/Personal/yt/v3/assets/fonts/OpenSans.ttf",
+      "fontSize": 120,
+      "penWidth": 5,
+      "color": "#ff5900",
+      "bold": true
+    },
+    "art8": {
+      "id": "art8",
+      "kind": "image",
+      "src": "/home/aryan/Downloads/red_arrow_pointed_less_curve.png"
+    },
+    "art9": {
+      "id": "art9",
+      "kind": "image",
+      "src": "/home/aryan/Downloads/brain_curly_transparent.png"
+    }
+  },
+  "pages": [
+    {
+      "id": "page1",
+      "name": "Page 1",
+      "cameraKeyframes": [
+        {
+          "t": 0,
+          "x": 0,
+          "y": 0,
+          "zoom": 1
+        },
+        {
+          "t": 4.7,
+          "x": 0,
+          "y": 0,
+          "zoom": 1
+        },
+        {
+          "t": 6.4,
+          "x": 3,
+          "y": -119,
+          "zoom": 2.335
+        },
+        {
+          "t": 8.2,
+          "x": 3,
+          "y": -119,
+          "zoom": 2.335
+        },
+        {
+          "t": 9.1,
+          "x": 483,
+          "y": -13,
+          "zoom": 1.017
+        }
+      ]
+    },
+    {
+      "id": "page2",
+      "name": "Page 2",
+      "cameraKeyframes": [
+        {
+          "t": 0,
+          "x": 0,
+          "y": 0,
+          "zoom": 1
+        },
+        {
+          "t": 30.9,
+          "x": 0,
+          "y": 0,
+          "zoom": 1
+        },
+        {
+          "t": 31.4,
+          "x": 457,
+          "y": 7,
+          "zoom": 1
+        },
+        {
+          "t": 31.42,
+          "x": 457,
+          "y": 7,
+          "zoom": 1
+        }
+      ]
+    },
+    {
+      "id": "page3",
+      "name": "Page 3",
+      "cameraKeyframes": [
+        {
+          "t": 0,
+          "x": 0,
+          "y": 0,
+          "zoom": 1
+        }
+      ]
+    }
+  ],
+  "pageBreaks": [
+    {
+      "t": 28.8,
+      "pageId": "page2",
+      "transition": "swipeLeft",
+      "duration": 0.6
+    }
+  ],
+  "tracks": [
+    {
+      "id": "v1",
+      "name": "Video 1",
+      "kind": "clip"
+    },
+    {
+      "id": "a1",
+      "name": "Audio 1",
+      "kind": "audio"
+    }
+  ],
+  "clips": [
+    {
+      "id": "clip1",
+      "assetId": "art1",
+      "animId": "draw.inkPaint",
+      "pageId": "page1",
+      "trackId": "v1",
+      "start": 0,
+      "duration": 4.6,
+      "transform": {
+        "x": -422,
+        "y": -413,
+        "scale": 0.53,
+        "rotation": 0
+      },
+      "params": {
+        "groupOrder": "darkFirst"
+      }
+    },
+    {
+      "id": "clip2",
+      "assetId": "art2",
+      "animId": "draw.stencilPaint",
+      "pageId": "page1",
+      "trackId": "v1",
+      "start": 6.9,
+      "duration": 1.5,
+      "transform": {
+        "x": -270,
+        "y": -302,
+        "scale": 0.258,
+        "rotation": 0
+      },
+      "params": {}
+    },
+    {
+      "id": "clip3",
+      "assetId": "art3",
+      "animId": "draw.inkPaint",
+      "pageId": "page1",
+      "trackId": "v1",
+      "start": 8.933,
+      "duration": 2.9,
+      "transform": {
+        "x": 460,
+        "y": -64,
+        "scale": 0.17,
+        "rotation": 0
+      },
+      "params": {}
+    },
+    {
+      "id": "clip4",
+      "assetId": "text1",
+      "animId": "draw.handwrite",
+      "pageId": "page1",
+      "trackId": "v1",
+      "start": 18.8,
+      "duration": 2.3,
+      "transform": {
+        "x": 522,
+        "y": -457,
+        "scale": 0.401,
+        "rotation": 0
+      },
+      "params": {}
+    },
+    {
+      "id": "clip6",
+      "assetId": "art4",
+      "animId": "appear.instant",
+      "pageId": "page1",
+      "trackId": "v1",
+      "start": 18.2,
+      "duration": 0.6,
+      "transform": {
+        "x": 354,
+        "y": -734,
+        "scale": 0.436,
+        "rotation": 0
+      },
+      "params": {}
+    },
+    {
+      "id": "clip7",
+      "assetId": "art5",
+      "animId": "appear.fade",
+      "pageId": "page1",
+      "trackId": "v1",
+      "start": 21.1,
+      "duration": 0.5,
+      "transform": {
+        "x": 601,
+        "y": 6,
+        "scale": 0.472,
+        "rotation": 0
+      },
+      "params": {}
+    },
+    {
+      "id": "clip5",
+      "assetId": "text2",
+      "animId": "draw.handwrite",
+      "pageId": "page1",
+      "trackId": "v1",
+      "start": 21.6,
+      "duration": 6.6,
+      "transform": {
+        "x": 837,
+        "y": 196,
+        "scale": 0.288,
+        "rotation": 0
+      },
+      "params": {}
+    },
+    {
+      "id": "clip8",
+      "assetId": "art6",
+      "animId": "draw.inkPaint",
+      "pageId": "page1",
+      "trackId": "v1",
+      "start": 12.1,
+      "duration": 4,
+      "transform": {
+        "x": 696,
+        "y": -205,
+        "scale": 0.197,
+        "rotation": 0
+      },
+      "params": {
+        "groupOrder": "readingOrder"
+      }
+    },
+    {
+      "id": "clip9",
+      "assetId": "text3",
+      "animId": "draw.handwrite",
+      "pageId": "page1",
+      "trackId": "v1",
+      "start": 16.1,
+      "duration": 1.1,
+      "transform": {
+        "x": 798,
+        "y": -64,
+        "scale": 0.435,
+        "rotation": 0
+      },
+      "params": {}
+    },
+    {
+      "id": "clip10",
+      "assetId": "art7",
+      "animId": "draw.inkPaint",
+      "pageId": "page2",
+      "trackId": "v1",
+      "start": 29.5,
+      "duration": 1.4,
+      "transform": {
+        "x": -275,
+        "y": -432,
+        "scale": 0.864,
+        "rotation": 0
+      },
+      "params": {}
+    },
+    {
+      "id": "clip12",
+      "assetId": "text4",
+      "animId": "draw.handwrite",
+      "pageId": "page2",
+      "trackId": "v1",
+      "start": 31.7,
+      "duration": 1.4,
+      "transform": {
+        "x": 568,
+        "y": -331,
+        "scale": 0.566,
+        "rotation": 0
+      },
+      "params": {}
+    },
+    {
+      "id": "clip11",
+      "assetId": "art8",
+      "animId": "draw.inkPaint",
+      "pageId": "page2",
+      "trackId": "v1",
+      "start": 33.7,
+      "duration": 1,
+      "transform": {
+        "x": 262,
+        "y": -207,
+        "scale": 0.293,
+        "rotation": 0
+      },
+      "params": {}
+    },
+    {
+      "id": "clip13",
+      "assetId": "art9",
+      "animId": "draw.inkPaint",
+      "pageId": "page2",
+      "trackId": "v1",
+      "start": 34.7,
+      "duration": 2.3,
+      "transform": {
+        "x": 703,
+        "y": -99,
+        "scale": 0.339,
+        "rotation": 0
+      },
+      "params": {
+        "groupOrder": "readingOrder"
+      }
+    }
+  ],
+  "audio": [
+    {
+      "id": "aud1",
+      "src": "/home/aryan/Personal/yt/vid/Alchemy/You Can Create Something from Nothing—Using PSYCHOLOGY [Alchemy by Rory Sutherland].wav",
+      "trackId": "a1",
+      "start": 0,
+      "trimIn": 0,
+      "duration": 38,
+      "speed": 1,
+      "gain": 1
+    }
+  ]
+}

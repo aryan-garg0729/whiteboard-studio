@@ -374,18 +374,27 @@ label.check input { accent-color: var(--accent); }
 .stage-overlay { position: absolute; inset: 0; cursor: default; }
 .stage-overlay.camera { cursor: grab; }
 .stage-overlay.camera:active { cursor: grabbing; }
+/* One SVG layer for every outline, so a rotated clip gets a real quad. */
+.stage-outlines { position: absolute; inset: 0; pointer-events: none; }
 .stage-box {
-  position: absolute; pointer-events: none;
-  outline: 1px dashed rgba(20,115,230,.30); outline-offset: 0;
+  fill: none; stroke: rgba(20,115,230,.30); stroke-width: 1;
+  stroke-dasharray: 4 3; vector-effect: non-scaling-stroke;
 }
-.stage-box.sel { outline: 1px solid var(--accent-hi); }
+.stage-box.sel { stroke: var(--accent-hi); stroke-dasharray: none; }
 .stage-handle {
   position: absolute; width: 9px; height: 9px; margin: -5px 0 0 -5px;
   background: #fff; border: 1px solid var(--accent-hi); border-radius: 1px;
   box-shadow: 0 1px 3px rgba(0,0,0,.5);
 }
+/* Cursors name the handle's job on an unrotated clip. They are not re-derived
+   per angle: an eight-way cursor that lags the artwork by a frame reads as a
+   glitch, and the handle's position already says which way it goes. */
 .stage-handle.nw, .stage-handle.se { cursor: nwse-resize; }
 .stage-handle.ne, .stage-handle.sw { cursor: nesw-resize; }
+.stage-handle.n, .stage-handle.s { cursor: ns-resize; }
+.stage-handle.e, .stage-handle.w { cursor: ew-resize; }
+.stage-handle.rot { border-radius: 50%; cursor: grab; }
+.stage-handle.rot:active { cursor: grabbing; }
 
 /* Camera-frame guide: thirds, drawn over the canvas, never exported. */
 .guides { position: absolute; inset: 0; pointer-events: none; }

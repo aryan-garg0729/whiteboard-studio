@@ -17,7 +17,10 @@ export const DEFAULTS = {
   // survives a Save As and a copied file.
   meta: { version: SCHEMA_VERSION, name: '', fps: 30, width: 1920, height: 1080,
           background: '#fdfdfb', handStyleId: 'hand3', showHand: true },
-  transform: { x: 0, y: 0, scale: 1, rotation: 0 },
+  // `scaleX`/`scaleY` multiply `scale` per axis, so 1 is the artwork's own
+  // proportions and a negative value mirrors that axis. `rotation` is in
+  // degrees. See engine/model/transform.js for the matrix these compose into.
+  transform: { x: 0, y: 0, scale: 1, scaleX: 1, scaleY: 1, rotation: 0 },
   camera: { t: 0, x: 0, y: 0, zoom: 1 },
   // Burned-in narration text. A printed face, not a handwriting face: these are
   // read at a glance while the hand is drawing something else, so legibility
@@ -174,6 +177,37 @@ function num(value, fallback, path, { min = -Infinity, max = Infinity } = {}) {
     throw new ProjectError(path, `must be between ${min} and ${max}, got ${value}`);
   }
   return value;
+}
+
+/**
+ * A clip's placement, checked field by field.
+ *
+ * This used to be a raw spread of whatever the file held, which meant a string
+ * or a NaN reached the renderer intact and produced an empty frame with no
+ * error anywhere -- the hardest kind of bad project to diagnose.
+ *
+ * A zero on either axis is refused rather than clamped: it is not a small clip,
+ * it is a singular matrix, and it would take hit-testing and the pen's inverse
+ * mapping with it.
+ */
+function transformOf(t, path) {
+  if (t === undefined || t === null) return { ...DEFAULTS.transform };
+  if (typeof t !== 'object' || Array.isArray(t)) {
+    throw new ProjectError(path, `expected an object, got ${JSON.stringify(t)}`);
+  }
+  const axis = (v, name) => {
+    const n = num(v, 1, `${path}.${name}`);
+    if (n === 0) throw new ProjectError(`${path}.${name}`, 'must not be zero');
+    return n;
+  };
+  return {
+    x: num(t.x, 0, `${path}.x`),
+    y: num(t.y, 0, `${path}.y`),
+    scale: num(t.scale, 1, `${path}.scale`, { min: 1e-6 }),
+    scaleX: axis(t.scaleX, 'scaleX'),
+    scaleY: axis(t.scaleY, 'scaleY'),
+    rotation: num(t.rotation, 0, `${path}.rotation`),
+  };
 }
 
 /**
@@ -432,7 +466,7 @@ export function normalizeProject(raw) {
       trackId: trackFor(c.trackId, 'clip', at),
       start: num(c.start, 0, `${at}.start`, { min: 0 }),
       duration: num(c.duration, 3, `${at}.duration`, { min: 0.01 }),
-      transform: { ...DEFAULTS.transform, ...(c.transform || {}) },
+      transform: transformOf(c.transform, `${at}.transform`),
       params: migrated.params || {},
     };
 

@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon, PATH } from './common.jsx';
 import StageOverlay from './StageOverlay.jsx';
-import { clipRect } from '../stageGeom.js';
+import { clipCorners } from '../stageGeom.js';
 
 const ZOOMS = [['fit', 'Fit'], [0.25, '25%'], [0.5, '50%'], [1, '100%']];
 const PAD = 28;
@@ -67,7 +67,10 @@ export default function Stage({
       .map((c) => ({
         id: c.id,
         bbox: bboxes.get(c.id),
-        rect: clipRect(meta, cam, scale, c.transform, bboxes.get(c.id)),
+        // Corners rather than a rectangle: the outline, every handle and the
+        // hit test all work on the real quad, which is the only thing that
+        // sits on the artwork once a clip is rotated or mirrored.
+        corners: clipCorners(meta, cam, scale, c.transform, bboxes.get(c.id)),
       }));
   }, [ed, bboxes, meta, cam, scale, frame, fps, pageId]);
 

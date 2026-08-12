@@ -31,6 +31,7 @@ import { parseSvg } from '../compile/svgDoc.js';
 import { outlineText, traceText } from '../compile/text.js';
 import { styleIdsFor } from '../hand/styles.js';
 import { migrateAnimation, normalizeProject, projectFrames } from '../model/project.js';
+import { penScale } from '../model/transform.js';
 import { createSession, ensureSurfaces } from '../render/renderFrame.js';
 import { imagePixels, vectorPixels } from '../render/rasterize.js';
 import { setSurfaceFactory } from '../render/surfaces.js';
@@ -79,9 +80,14 @@ export function installNodeSurfaces() {
 const drawableAnim = (clip) =>
   getAnimation(migrateAnimation(clip.animId ?? 'draw.stencilPaint').animId);
 
-/** Brush widths are authored in screen terms, so they divide out the scale. */
+/**
+ * Brush widths are authored in screen terms, so they divide out the scale.
+ *
+ * `penScale` rather than `transform.scale`: a squeezed clip has no single
+ * on-screen scale, and its geometric mean is the closest thing to one.
+ */
 const brushOpts = (clip) => ({
-  fillBrushWidth: Math.max(8, 15 / clip.transform.scale),
+  fillBrushWidth: Math.max(8, 15 / penScale(clip.transform)),
   ...clip.params,
 });
 
