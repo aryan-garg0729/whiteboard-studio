@@ -4,8 +4,10 @@ const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('studio', {
   openProject: (path) => ipcRenderer.invoke('project:open', path),
-  prepareProject: (project, basePath) =>
-    ipcRenderer.invoke('project:prepare', { project, basePath }),
+  // `reuse` lets the renderer say what it already has, so main only re-encodes
+  // the clips whose artwork actually changed. See prepare.js.
+  prepareProject: (project, basePath, reuse) =>
+    ipcRenderer.invoke('project:prepare', { project, basePath, reuse }),
   saveProject: (project, path, saveAs) =>
     ipcRenderer.invoke('project:save', { project, path, saveAs }),
   listExamples: () => ipcRenderer.invoke('project:examples'),

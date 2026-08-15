@@ -1,6 +1,11 @@
 import React, { useState } from 'react';
 import { Field, Icon, Num, PATH } from './common.jsx';
 import { FontList } from './FontPicker.jsx';
+import { TEXT_ALIGNS } from '../../engine/model/project.js';
+import { DEFAULT_TEXT_ALIGN } from '../../engine/compile/text.js';
+
+/** Glyphs rather than words: three of them have to fit on one row. */
+const ALIGN_LABEL = { left: '\u2630', center: '\u2632', right: '\u2634' };
 
 const TABS = [
   ['media', 'Media'],
@@ -124,6 +129,20 @@ function TextTab({ fonts, draft, setDraft, onAdd }) {
           </label>
         </Field>
       </div>
+      <Field label="Lines">
+        <div className="seg">
+          {TEXT_ALIGNS.map((a) => (
+            <button
+              key={a}
+              aria-pressed={(draft.align ?? DEFAULT_TEXT_ALIGN) === a}
+              title={`Align ${a}`}
+              onClick={() => setDraft({ ...draft, align: a })}
+            >
+              {ALIGN_LABEL[a]}
+            </button>
+          ))}
+        </div>
+      </Field>
 
       <button className="btn primary wide" disabled={!draft.text.trim()} onClick={onAdd}>
         <Icon d={PATH.plus} /> Add text clip

@@ -399,17 +399,23 @@ test('the main process ships subtitle font bytes, and only when they are needed'
   // The renderer has no filesystem, so this is the only way a subtitle gets a
   // letterform in the app. Silence here is a blank subtitle band in the editor.
   const base = { meta: { name: 'f' }, assets: {}, clips: [] };
-  assert.equal(prepareSubtitleFont(normalizeProject(base), '.'), null);
+  assert.equal(prepareSubtitleFont(normalizeProject(base), '.').font, null);
   assert.equal(
-    prepareSubtitleFont(normalizeProject({ ...base, subtitles: { words: [] } }), '.'), null,
+    prepareSubtitleFont(normalizeProject({ ...base, subtitles: { words: [] } }), '.').font, null,
     'no words, nothing to set');
 
   const withWords = normalizeProject({ ...base, subtitles: { words: words(['hi', 0, 1]) } });
-  const b64 = prepareSubtitleFont(withWords, '.');
+  const { font: b64, id } = prepareSubtitleFont(withWords, '.');
   assert.ok(b64 && b64.length > 1000, 'expected a font');
   // And it must be the same face the Node host would have used, or the editor's
   // preview and the exported file would set the same words differently.
   assert.ok(parseFont(Buffer.from(b64, 'base64')).unitsPerEm > 0);
+
+  // Re-prepared on every keystroke, so a renderer that already parsed this face
+  // is told to keep it rather than sent a megabyte of font again.
+  const again = prepareSubtitleFont(withWords, '.', id);
+  assert.equal(again.font, null, 'bytes must not be re-sent for a face already held');
+  assert.equal(again.id, id, 'but the identity still comes back, or it reads as absent');
 });
 
 test('the renderer decodes those bytes into the font the Node host loaded', () => {
@@ -420,7 +426,7 @@ test('the renderer decodes those bytes into the font the Node host loaded', () =
     meta: { name: 'f' }, assets: {}, clips: [],
     subtitles: { words: words(['hi', 0, 1]) },
   });
-  const viaIpc = parseFont(base64Bytes(prepareSubtitleFont(project, '.')));
+  const viaIpc = parseFont(base64Bytes(prepareSubtitleFont(project, '.').font));
   const viaDisk = loadSubtitleFont(project, { root: '.' });
   assert.equal(viaIpc.unitsPerEm, viaDisk.unitsPerEm);
   assert.equal(viaIpc.charToGlyph('g').index, viaDisk.charToGlyph('g').index);

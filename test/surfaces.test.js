@@ -39,7 +39,7 @@ test('reset clears the active layer, not just the committed one', () => {
 
 test('resetAll leaves no layer holding stale ink', () => {
   const sf = new ClipSurfaces(64, 64, 0, 0);
-  for (const l of [sf.fill, sf.erase]) {
+  for (const l of [sf.fill, sf.ensureErase()]) {
     paint(l.committed.ctx);
     paint(l.active.ctx);
   }
@@ -62,8 +62,8 @@ test('a reset clip composites to nothing even with artwork installed', () => {
   paint(sf.fill.active.ctx);   // stale mask from a warm-up render
   sf.resetAll();
 
-  sf.composite();
-  assert.equal(inked(sf.out, 64, 64), 0,
+  const out = sf.composite();
+  assert.equal(inked({ ctx: out.getContext('2d') }, 64, 64), 0,
     'nothing may show through before any stroke has been drawn');
 });
 

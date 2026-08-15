@@ -38,6 +38,8 @@ export function createSession({
   return {
     plans: new Map(), erasePlans: new Map(), surfaces: new Map(), hands, resolveImage,
     subtitleFont,
+    /** Page ids in most-recently-drawn order. See `releaseSurfaces`. */
+    pageLru: [],
   };
 }
 
@@ -105,6 +107,52 @@ function surfacesFor(session, clip, plan) {
     session.surfaces.set(clip.id, sf);
   }
   return sf;
+}
+
+/**
+ * How many pages keep their surfaces. Two, because that is what a page
+ * transition needs on screen at once -- and it also means scrubbing back over
+ * the break you just crossed costs nothing.
+ */
+const PAGES_RESIDENT = 2;
+
+/**
+ * Give back the ink of every clip that is not on a resident page.
+ *
+ * A clip's mask layers are only ever read while its own page is being drawn --
+ * `renderPage` skips the rest outright -- so what a project needs at once is the
+ * ink of its biggest page, not of all of them summed. On the 56-clip project
+ * this was measured against, mask layers are 756 MB across eight pages and at
+ * most 220 MB for any two of them.
+ *
+ * Only the ink. The artwork stays: it was painted by the host, once, and there
+ * is no way to ask for it again from here. That also makes the release cheap to
+ * undo -- `ClipSurfaces.releaseInk` explains why the replay is exact.
+ *
+ * The cost is one expensive frame when a page comes back, since its clips
+ * re-draw every stroke they had already committed. That is why the resident set
+ * is a small LRU rather than a single page: crossing a page break and stepping
+ * back over it is the common scrubbing move, and it stays free.
+ */
+export function releaseSurfaces(session, project, keep) {
+  const first = project.pages?.[0]?.id;
+  for (const clip of project.clips || []) {
+    if (keep.has(clip.pageId ?? first)) continue;
+    session.surfaces.get(clip.id)?.releaseInk();
+  }
+}
+
+/** Note the pages in play this frame and release whatever fell off the LRU. */
+function trimToResident(session, project, active) {
+  let lru = session.pageLru ?? [];
+  for (const id of active) {
+    if (id == null) continue;
+    lru = [id, ...lru.filter((p) => p !== id)];
+  }
+  // Never evict a page this frame needs, however many that is.
+  const limit = Math.max(PAGES_RESIDENT, active.filter((p) => p != null).length);
+  session.pageLru = lru.slice(0, limit);
+  if (lru.length > limit) releaseSurfaces(session, project, new Set(session.pageLru));
 }
 
 /**
@@ -234,6 +282,8 @@ export function renderPage(session, project, pageId, t, ctx, opts) {
       ctx.translate(-cx, -cy);
       ctx.globalAlpha = enter.alpha ?? 1;
     }
+    // `out` is pooled scratch and belongs to the next clip to composite, so it
+    // has to be consumed here rather than held.
     ctx.drawImage(out, sf.originX, sf.originY);
     ctx.restore();
 
@@ -299,9 +349,17 @@ export function renderFrame(session, project, frameIndex, ctx, opts) {
   const t = frameIndex / fps;
 
   const state = pageStateAt(project, t);
+  const transitioning = state.u < 1 && !!TRANSITION_DIR[state.transition];
   let handAt = null;
 
-  if (state.u >= 1 || !TRANSITION_DIR[state.transition]) {
+  // Before rendering, not after: the pages this frame needs must be resident
+  // when `renderPage` asks for them, and anything else is dead weight while it
+  // works. Semantically transparent, like the caches below -- what gets drawn
+  // still depends only on (project, frameIndex).
+  trimToResident(session, project,
+    transitioning ? [state.pageId, state.fromPageId] : [state.pageId]);
+
+  if (!transitioning) {
     // The common case, and the whole of any single-page project: exactly the
     // work this function did before pages existed.
     handAt = renderPage(session, project, state.pageId, t, ctx, opts);

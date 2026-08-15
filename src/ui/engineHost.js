@@ -61,11 +61,101 @@ function loadImage(src) {
 }
 
 /**
- * @param {Object} loaded the payload from `studio.openProject()`
- * @returns {Promise<{session, project, frames, hand}>}
+ * Everything a clip's compiled geometry depends on, as one comparable string.
+ *
+ * This is the whole basis for reusing work across a rebuild, so it has to name
+ * every input the two compile stages read and nothing else. Too much and the
+ * editor is back to recompiling the project on every keystroke; too little and
+ * it renders stale artwork, which is far worse -- so when in doubt, include it.
+ *
+ * What is deliberately absent is the rest of `transform`. Position, rotation and
+ * the sign of a mirror do not change a stroke: surfaces are object-local and the
+ * bbox is measured before placement. Only the *scale* is here, and only through
+ * `penScale`, because brush widths are authored in screen terms and divide it
+ * out -- which is exactly the rule `Studio.updateClip` already applies on the
+ * server. `start`, `duration`, `pageId` and `trackId` are absent for the same
+ * reason they are in `TIMING_FIELDS`: they decide when a clip is on screen, not
+ * what it looks like.
  */
-export async function buildSession(loaded) {
+export function clipKey(clip, asset) {
+  return JSON.stringify([
+    clip.assetId,               // stencilPaint seeds its scribble off the asset id
+    clip.animId,
+    clip.params ?? null,
+    penScale(clip.transform),
+    asset.kind,
+    asset.src ?? null,
+    asset.text ?? null,
+    asset.font ?? null,
+    asset.fontSize ?? null,
+    asset.penWidth ?? null,
+    asset.color ?? null,
+    !!asset.bold,
+    asset.align ?? null,
+  ]);
+}
+
+/**
+ * What the *session* captures that the live document cannot correct after the
+ * fact -- i.e. everything outside the per-clip plans.
+ *
+ * `renderFrame` is handed the live document on every paint, so a change to
+ * meta, pages, camera or the subtitle wording needs no rebuild at all. These two
+ * are the exceptions, because they are baked into the session when it is built:
+ * the hand sprites are decoded images held in `resolveImage`, and the subtitle
+ * face is a parsed font. Skipping a rebuild when either moved would leave the
+ * editor drawing with the old hand, or setting captions in the old typeface.
+ */
+export function sessionKey(project) {
+  const subs = project.subtitles;
+  return JSON.stringify([
+    project.meta?.handStyleId ?? null,
+    subs?.enabled && subs.words?.length ? subs.font : null,
+  ]);
+}
+
+/** The key of every clip in a document, by clip id. */
+export function clipKeys(project) {
+  const keys = new Map();
+  for (const clip of project.clips) {
+    keys.set(clip.id, clipKey(clip, project.assets[clip.assetId]));
+  }
+  return keys;
+}
+
+/**
+ * What a rebuild has to do: which clips need re-preparing, and which are gone.
+ *
+ * A clip is stale when its key moved, and new when the previous session never
+ * had one; both need the same treatment, so they come back as one list.
+ * Removals are reported separately because they need no work from the main
+ * process at all -- but they are not nothing, and a caller that only checked
+ * `stale` would skip the rebuild that drops a deleted clip's surfaces and its
+ * entry in `bboxes`.
+ */
+export function staleClips(project, previousKeys) {
+  const keys = clipKeys(project);
+  if (!previousKeys) return { keys, stale: [...keys.keys()], removed: [] };
+  return {
+    keys,
+    stale: [...keys].filter(([id, k]) => previousKeys.get(id) !== k).map(([id]) => id),
+    removed: [...previousKeys.keys()].filter((id) => !keys.has(id)),
+  };
+}
+
+/**
+ * @param {Object} loaded the payload from `studio.openProject()`
+ * @param {Object} [previous] the session this one replaces, if any. Clips whose
+ *   `clipKey` is unchanged keep its compiled plan *and* its surfaces, artwork
+ *   and accumulated ink included -- so an edit costs one clip's work rather than
+ *   the whole project's. Anything it holds that the new document does not carry
+ *   over is disposed here rather than left for the collector; canvas memory is
+ *   native and would otherwise sit at two full sessions' worth for a while.
+ * @returns {Promise<{session, project, frames, hand, bboxes, keys}>}
+ */
+export async function buildSession(loaded, previous = null) {
   const { project, prepared, hand, subtitleFont } = loaded;
+  const reusable = previous?.session;
 
   const images = new Map();
   for (const [file, url] of Object.entries(hand.images)) {
@@ -79,12 +169,43 @@ export async function buildSession(loaded) {
     resolveImage: (src) => images.get(src.file),
     // The renderer lays subtitles out itself, from the face the main process
     // sent, so changing their size or wording repaints without a round trip.
-    subtitleFont: await subtitleFontFrom(subtitleFont),
+    // A null `subtitleFont` beside a non-null id means main knows we already
+    // parsed the right face and did not send it again.
+    subtitleFont: (!subtitleFont && loaded.subtitleFontId)
+      ? reusable?.subtitleFont ?? null
+      : await subtitleFontFrom(subtitleFont),
   });
 
   const artJobs = [];
   for (const clip of project.clips) {
     const p = prepared[clip.id];
+
+    // Not re-prepared, so nothing about its geometry moved: take the compiled
+    // plan and the surfaces whole. The surfaces are the valuable half -- they
+    // carry the artwork already painted into them and the ink already laid
+    // down, neither of which this rebuild would otherwise have any way to keep.
+    if (!p && reusable?.plans.has(clip.id)) {
+      const plan = reusable.plans.get(clip.id);
+      session.plans.set(clip.id, plan);
+      const sf = reusable.surfaces.get(clip.id);
+      if (sf) session.surfaces.set(clip.id, sf);
+      // Recomputed from the current document rather than carried across: an
+      // erase sweep can be added or removed without touching the clip's key,
+      // since it changes no compiled geometry of the clip itself.
+      if (clip.erase) {
+        session.erasePlans.set(clip.id,
+          reusable.erasePlans.get(clip.id) ?? compileErase(plan, { id: clip.id }));
+      }
+      continue;
+    }
+
+    if (!p) {
+      // Main was asked to skip this clip on the strength of a plan the previous
+      // session turned out not to have. Rendering on would silently drop the
+      // clip; failing here names the one thing that can cause it.
+      throw new Error(`${clip.id}: not prepared and no plan to reuse`);
+    }
+
     let plan;
 
     if (p.kind === 'text') {
@@ -173,12 +294,33 @@ export async function buildSession(loaded) {
     }
   }
 
+  // Anything the old session held that this one did not adopt -- a deleted clip,
+  // or one whose artwork changed and was rebuilt from scratch. Its canvases are
+  // native memory the collector is in no hurry to reclaim, and on a project of
+  // any size that is the difference between a rebuild costing nothing and it
+  // holding two full sets of surfaces until a GC happens to run.
+  for (const [id, sf] of reusable?.surfaces ?? []) {
+    if (session.surfaces.get(id) !== sf) sf.dispose();
+  }
+
   // Local-space bounds per clip, so the editor can draw selection boxes and
   // hit-test without reaching into the compiled plans itself.
   const bboxes = new Map();
   for (const [id, plan] of session.plans) bboxes.set(id, plan.bbox);
 
-  return { session, project, frames: loaded.frames, hand: hand.style, bboxes };
+  return {
+    session,
+    project,
+    frames: loaded.frames,
+    hand: hand.style,
+    bboxes,
+    // What the next rebuild diffs against to decide what it can keep.
+    keys: clipKeys(project),
+    sessionKey: sessionKey(project),
+    // The face `session.subtitleFont` was parsed from, so the next prepare can
+    // tell main not to send it again.
+    subtitleFontId: loaded.subtitleFontId ?? null,
+  };
 }
 
 export { renderFrame };

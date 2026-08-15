@@ -100,6 +100,7 @@ export async function storyboard({ doc, beats, ctx }) {
           ...(beat.fontSize ? { fontSize: beat.fontSize } : {}),
           ...(beat.color ? { color: beat.color } : {}),
           ...(beat.bold !== undefined ? { bold: beat.bold } : {}),
+          ...(beat.align ? { align: beat.align } : {}),
         },
         animId: beat.animId && beat.animId.startsWith('draw.') && !art
           ? beat.animId

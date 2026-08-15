@@ -65,14 +65,21 @@ function readFont(fontPath) {
  * font once lets the renderer re-lay-out locally, so only a change of *face*
  * costs a re-prepare.
  *
- * @returns {string|null} base64, or null when there is nothing to set
+ * @param {string|null} [have] the face the renderer has already parsed. When it
+ *   matches, the bytes are not sent: this is re-prepared on every keystroke, and
+ *   shipping a megabyte of font across IPC for the renderer to re-parse with
+ *   opentype is pure waste when only the wording changed.
+ * @returns {{font:string|null, id:string|null}} base64 and the identity it was
+ *   read from; `font` is null both when there is nothing to set and when the
+ *   renderer already has the right face -- `id` tells the two apart.
  */
-export function prepareSubtitleFont(project, root) {
+export function prepareSubtitleFont(project, root, have = null) {
   const subs = project.subtitles;
-  if (!subs?.enabled || !subs.words?.length) return null;
+  if (!subs?.enabled || !subs.words?.length) return { font: null, id: null };
   const fontPath = isAbsolute(subs.font) ? subs.font : join(root, subs.font);
   readFont(fontPath);                    // fail here, with a good message
-  return readFileSync(fontPath).toString('base64');
+  if (have === fontPath) return { font: null, id: fontPath };
+  return { font: readFileSync(fontPath).toString('base64'), id: fontPath };
 }
 
 /**
@@ -103,13 +110,22 @@ function serializeVector(parsed) {
 /**
  * @param {Object} project a normalised project
  * @param {string} projectPath used to resolve relative asset paths
+ * @param {Set<string>|null} [only] clip ids to prepare; null prepares every one
+ *
+ * `only` is what keeps editing responsive. Preparing a clip means reading its
+ * source file and base64ing the whole thing, and the renderer re-prepares on a
+ * 260 ms debounce -- so without it, typing one letter into a caption re-encodes
+ * every image in the project (tens of megabytes, allocated here, structured-
+ * cloned across IPC, then allocated again in the renderer) to change some text.
+ * The renderer decides what is stale; see `clipKey` in src/ui/engineHost.js.
  */
-export async function prepareProject(project, projectPath) {
+export async function prepareProject(project, projectPath, only = null) {
   const dir = dirname(projectPath);
   const rel = (p) => (isAbsolute(p) ? p : resolve(dir, p));
 
   const prepared = {};
   for (const clip of project.clips) {
+    if (only && !only.has(clip.id)) continue;
     const asset = project.assets[clip.assetId];
 
     if (asset.kind === 'vector') {
@@ -129,6 +145,10 @@ export async function prepareProject(project, projectPath) {
         penWidth: asset.penWidth ?? Math.max(2, (asset.fontSize ?? 120) * 0.045),
         color: asset.color,
         bold: !!asset.bold,
+        // Undefined is meaningful: `placeGlyphs` applies DEFAULT_TEXT_ALIGN, so a
+        // document that never mentions alignment gets the default rather than a
+        // value this layer guessed.
+        align: asset.align,
       };
 
       // Both text drawing modes reveal real outlines. Trace additionally gets

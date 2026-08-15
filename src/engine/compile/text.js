@@ -22,6 +22,24 @@ const BOLD_WGHT = 700;
 const REGULAR_WGHT = 400;
 
 /**
+ * Centre, because a whiteboard caption is a title rather than a paragraph.
+ *
+ * Ragged-right is the right default for body copy, which is read in bulk and
+ * benefits from an even left margin to return to. A caption here is two or
+ * three short lines sitting on their own in the frame, usually beside a drawing,
+ * and centring is what makes that read as one deliberate block rather than as
+ * text that ran out. It is also what every clip in the example projects was
+ * hand-placed to look like.
+ *
+ * Single-line text is unaffected whatever this says -- there is nothing to
+ * align it against.
+ */
+export const DEFAULT_TEXT_ALIGN = 'center';
+
+/** Share of the slack a line is pushed right by. */
+const ALIGN_FRACTION = { left: 0, center: 0.5, right: 1 };
+
+/**
  * Synthetic emboldening width, as a fraction of the font size.
  *
  * Only reached on a face with no `wght` axis. Stroking a glyph's own outline at
@@ -164,6 +182,7 @@ export function placeGlyphs(font, text, o) {
 
   const lines = String(text).split('\n');
   const placements = [];
+  const lineWidths = [];
   let maxWidth = 0;
 
   lines.forEach((line, lineIndex) => {
@@ -188,8 +207,25 @@ export function placeGlyphs(font, text, o) {
       placements.push({ glyph, ch: chars[i], penX, lineIndex });
       penX += glyph.advanceWidth;
     });
+    lineWidths[lineIndex] = penX;
     maxWidth = Math.max(maxWidth, penX);
   });
+
+  // Alignment is a second pass because it is defined against the widest line,
+  // which is not known until every line has been measured. Shifting `penX` here
+  // rather than at draw time means everything downstream -- glyph bounds, the
+  // reveal's word spans, `inkBbox`, the handwriting guides -- is already in the
+  // right place and knows nothing about alignment.
+  //
+  // `maxWidth` itself is untouched, so the drawable's bbox and therefore the
+  // clip's placement in frame are the same whichever alignment is chosen.
+  const share = ALIGN_FRACTION[o.align ?? DEFAULT_TEXT_ALIGN]
+    ?? ALIGN_FRACTION[DEFAULT_TEXT_ALIGN];
+  if (share) {
+    for (const p of placements) {
+      p.penX += (maxWidth - lineWidths[p.lineIndex]) * share;
+    }
+  }
 
   return { placements, scale, lineHeight, maxWidth, lineCount: lines.length, weight };
 }

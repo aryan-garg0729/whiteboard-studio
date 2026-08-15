@@ -173,17 +173,31 @@ function absolutize(project, dir) {
   };
 }
 
-/** Normalise + prepare a document. The one path every project load goes through. */
-async function prepare(raw, basePath) {
+/**
+ * Normalise + prepare a document. The one path every project load goes through.
+ *
+ * `reuse` is what the renderer already holds: `only` names the clips whose
+ * compiled inputs actually changed, and `subtitleFont` the face it has parsed.
+ * Both default to "nothing", which is a full prepare -- the right thing for an
+ * open, and the only thing that is safe when there is no previous session.
+ */
+async function prepare(raw, basePath, reuse = {}) {
   const project = absolutize(normalizeProject(raw), dirname(basePath));
-  const prepared = await prepareProject(project, basePath);
+  const only = reuse.only ? new Set(reuse.only) : null;
+  const prepared = await prepareProject(project, basePath, only);
+  const subtitleFont = prepareSubtitleFont(project, ROOT, reuse.subtitleFont ?? null);
   return {
     project,
+    // Carries only the clips `reuse.only` asked for; the renderer keeps the
+    // plans it already has for the rest. A failed prepare never reaches here --
+    // it is reported as `{ error }` -- so an absent entry unambiguously means
+    // "you already have this one".
     prepared,
     hand: prepareHand(ROOT, project.meta.handStyleId),
     // Sits beside `prepared` rather than inside it: that map is keyed by clip id
     // and the renderer indexes it with one.
-    subtitleFont: prepareSubtitleFont(project, ROOT),
+    subtitleFont: subtitleFont.font,
+    subtitleFontId: subtitleFont.id,
     frames: projectFrames(project),
   };
 }
@@ -214,9 +228,9 @@ ipcMain.handle('project:open', async (_e, requested) => {
 });
 
 /** Re-prepare an edited in-memory document. */
-ipcMain.handle('project:prepare', async (_e, { project, basePath }) => {
+ipcMain.handle('project:prepare', async (_e, { project, basePath, reuse }) => {
   try {
-    return await prepare(project, basePath || join(ROOT, 'examples', 'untitled.json'));
+    return await prepare(project, basePath || join(ROOT, 'examples', 'untitled.json'), reuse);
   } catch (err) {
     return asError(err);
   }

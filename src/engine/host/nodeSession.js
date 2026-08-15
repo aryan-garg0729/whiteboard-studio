@@ -133,6 +133,10 @@ async function buildTextClip(clip, asset, { rel, root }) {
     penWidth: asset.penWidth ?? Math.max(2, (asset.fontSize ?? 120) * 0.045),
     color: asset.color,
     bold: !!asset.bold,
+    // Undefined is meaningful: `placeGlyphs` applies DEFAULT_TEXT_ALIGN, so a
+    // document that never mentions alignment gets the default rather than a
+    // value this layer guessed.
+    align: asset.align,
   };
 
   // Same branch as electron/prepare.js: both drawing modes retain real glyph

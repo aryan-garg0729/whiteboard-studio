@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import opentype from 'opentype.js';
 import { createCanvas } from '@napi-rs/canvas';
 
-import { outlineText, traceText } from '../src/engine/compile/text.js';
+import { outlineText, placeGlyphs, traceText } from '../src/engine/compile/text.js';
 import { guideForCharacter } from '../src/engine/compile/textGuides.js';
 import handwrite from '../src/engine/anim/handwrite.js';
 import { setSurfaceFactory, ClipSurfaces } from '../src/engine/render/surfaces.js';
@@ -344,4 +344,113 @@ test('reveal travel path bulges during gaps and line breaks', { skip: !font }, a
   // The midpoint of the travel between lines must be bulged (smaller Y means higher up on screen)
   const expectedLinearY = (seg.y0 + seg.y1) / 2;
   assert.ok(midAt.y < expectedLinearY - 5, 'midpoint of line break should be bulged upward');
+});
+
+// ── alignment ─────────────────────────────────────────────────────────
+
+/** Left edge of the ink on each line, which is what alignment actually moves. */
+const lineLefts = (out) => out.lines.map((l) => (l.spans.length ? l.spans[0][0] : null));
+
+/** Right edge of the ink on each line. */
+const lineRights = (out) =>
+  out.lines.map((l) => (l.spans.length ? l.spans[l.spans.length - 1][1] : null));
+
+/**
+ * Where each line starts and ends in *advance* units, which is what alignment
+ * is defined against.
+ *
+ * Deliberately not the ink extents: a glyph's sidebearing is part of its
+ * advance, so two lines that are perfectly aligned still have ink edges a couple
+ * of pixels apart depending on which letters they happen to end with. Aligning
+ * on advances is what every text engine does, and optical alignment would be a
+ * different feature.
+ */
+function lineAdvances(text, o) {
+  const { placements, lineCount } = placeGlyphs(font, text, o);
+  const rows = Array.from({ length: lineCount }, () => ({ x0: Infinity, x1: -Infinity }));
+  for (const p of placements) {
+    const row = rows[p.lineIndex];
+    row.x0 = Math.min(row.x0, p.penX);
+    row.x1 = Math.max(row.x1, p.penX + p.glyph.advanceWidth);
+  }
+  return rows;
+}
+
+test('a short line is centred against the long one by default', { skip: !font }, () => {
+  // Deliberately lopsided, so the offset is far larger than any rounding.
+  const text = 'a much longer line\nshort';
+  const [long, short] = lineAdvances(text, { fontSize: 100 });
+
+  assert.ok(short.x0 > long.x0, 'the short line must be pushed in from the left');
+  assert.ok(short.x1 < long.x1, 'and must not reach as far right');
+  // Centred means the two margins match, not merely that the line moved.
+  assert.ok(Math.abs((short.x0 - long.x0) - (long.x1 - short.x1)) < 1e-6,
+    `margins must match, got ${short.x0 - long.x0} and ${long.x1 - short.x1}`);
+
+  // The ink follows, allowing for the sidebearings above.
+  const out = outlineText(font, text, { fontSize: 100 });
+  assert.ok(lineLefts(out)[1] > lineLefts(out)[0]);
+  assert.ok(lineRights(out)[1] < lineRights(out)[0]);
+});
+
+test('align picks which edge the lines agree on', { skip: !font }, () => {
+  const text = 'a much longer line\nshort';
+  const left = lineAdvances(text, { fontSize: 100, align: 'left' });
+  const right = lineAdvances(text, { fontSize: 100, align: 'right' });
+
+  assert.equal(left[0].x0, left[1].x0, 'left-aligned lines must start together');
+  assert.equal(right[0].x1, right[1].x1, 'right-aligned lines must end together');
+  // And the two are genuinely different layouts, or neither assertion proves much.
+  assert.ok(right[1].x0 > left[1].x0);
+});
+
+test('alignment moves the ink but never the drawable', { skip: !font }, () => {
+  // The bbox is what places the clip in frame, so if it moved with alignment,
+  // changing alignment would shove the caption across the page.
+  const text = 'a much longer line\nshort';
+  const each = ['left', 'center', 'right'].map((align) =>
+    outlineText(font, text, { fontSize: 100, align }));
+
+  for (const out of each.slice(1)) {
+    assert.deepEqual(out.bbox, each[0].bbox, 'bbox must not depend on alignment');
+    assert.equal(out.width, each[0].width);
+    assert.equal(out.height, each[0].height);
+  }
+});
+
+test('a single line lays out identically whatever the alignment', { skip: !font }, () => {
+  // There is no slack to distribute, so all three must agree exactly -- this is
+  // what makes centring safe as a default for existing one-line captions.
+  const each = ['left', 'center', 'right'].map((align) =>
+    outlineText(font, 'Hello world', { fontSize: 100, align }));
+  assert.deepEqual(each[1].inkBbox, each[0].inkBbox);
+  assert.deepEqual(each[2].inkBbox, each[0].inkBbox);
+});
+
+test('an unknown alignment falls back to the default rather than collapsing',
+  { skip: !font }, () => {
+    const text = 'a much longer line\nshort';
+    const bogus = outlineText(font, text, { fontSize: 100, align: 'justify' });
+    const centred = outlineText(font, text, { fontSize: 100, align: 'center' });
+    assert.deepEqual(lineLefts(bogus), lineLefts(centred));
+  });
+
+test('handwriting guides follow the aligned letters', { skip: !font }, () => {
+  // traceText fits its routes to each glyph's own bounds, so if alignment were
+  // applied anywhere later than placeGlyphs the guides would be left behind on
+  // the unaligned positions.
+  const text = 'a much longer line\nshort';
+  const layout = traceText(font, text, { fontSize: 100, penWidth: 5, align: 'right' });
+  const outline = outlineText(font, text, { fontSize: 100, align: 'right' });
+
+  const inked = layout.glyphs.filter((g) => g.ink);
+  const last = inked[inked.length - 1];
+  const guide = layout.guides.find((g) => g.glyph === last.regionIndex && !g.lift);
+  assert.ok(guide, 'expected a guide on the last glyph');
+
+  const xs = guide.pts.filter((_, i) => i % 2 === 0);
+  const [x0, , x1] = last.bbox;
+  assert.ok(Math.min(...xs) >= x0 - 1 && Math.max(...xs) <= x1 + 1,
+    'the guide must sit inside its glyph, wherever alignment put it');
+  assert.deepEqual(lineRights(layout), lineRights(outline));
 });

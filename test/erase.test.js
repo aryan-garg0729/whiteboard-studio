@@ -51,7 +51,8 @@ test('advanceErase marks the layer used from the very first frame', () => {
   const sf = new ClipSurfaces(400, 400, 0, 0);
   const ep = compileErase(plan, { id: 'x' });
 
-  assert.equal(sf.erase.used, false);
+  // Null rather than an unused layer: the pair is allocated on first sweep.
+  assert.equal(sf.erase, null);
   advanceErase(sf, ep, 0.05);
   assert.equal(sf.erase.used, true, 'erase must composite while still in progress');
   assert.equal(sf.erase.committedUpTo, 0, 'and it does so before any stroke completes');

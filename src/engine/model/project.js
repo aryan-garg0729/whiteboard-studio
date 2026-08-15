@@ -55,6 +55,16 @@ export const SUBTITLE_STYLES = new Set(['bar', 'karaoke', 'pop']);
 /** Asset kinds the renderer knows how to build. */
 export const ASSET_KINDS = new Set(['image', 'vector', 'text']);
 
+/**
+ * How a multi-line text asset sits within its own width.
+ *
+ * Here rather than in `compile/text.js`, which is what applies it, because this
+ * file is the vocabulary of a document and is deliberately free of imports --
+ * the layout module pulls in `svgpath`, and the validator has no business
+ * depending on a path library to know which words are legal.
+ */
+export const TEXT_ALIGNS = ['left', 'center', 'right'];
+
 /** Animation ids that ship today. Kept as data so the check stays honest. */
 export const KNOWN_ANIMATIONS = new Set([
   'draw.stencilPaint', 'draw.inkPaint', 'draw.textReveal', 'draw.handwrite',
@@ -308,6 +318,13 @@ export function normalizeProject(raw) {
     }
     if (a.bold !== undefined && typeof a.bold !== 'boolean') {
       throw new ProjectError(`${at}.bold`, 'expected true or false');
+    }
+    // Left unset rather than defaulted here: the layout applies
+    // DEFAULT_TEXT_ALIGN, and writing it into every document would churn every
+    // saved project the first time it is opened.
+    if (a.align !== undefined && !TEXT_ALIGNS.includes(a.align)) {
+      throw new ProjectError(`${at}.align`,
+        `expected one of ${TEXT_ALIGNS.join(', ')}, got ${JSON.stringify(a.align)}`);
     }
     // .svg routed through the raster tracer would hit cv2.imread and fail, so
     // normalise the kind from the extension rather than trusting the author.

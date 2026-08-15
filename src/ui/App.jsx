@@ -15,7 +15,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { normalizeProject, pageStateAt, projectFrames } from '../engine/model/project.js';
 import { cameraAt } from '../engine/render/renderFrame.js';
-import { buildSession, renderFrame } from './engineHost.js';
+import { DEFAULT_TEXT_ALIGN } from '../engine/compile/text.js';
+import { buildSession, renderFrame, sessionKey, staleClips } from './engineHost.js';
 import { useAudioClock } from './audioClock.js';
 import { useEditor, uniqueId, EMPTY_PROJECT } from './state/editor.js';
 import { placeInFrame } from './stageGeom.js';
@@ -29,6 +30,7 @@ import Timeline from './components/Timeline.jsx';
 const DEFAULT_TEXT = {
   text: '', font: null, fontFamily: null,
   fontSize: 120, penWidth: 5, color: '#1a1a1a', bold: false,
+  align: DEFAULT_TEXT_ALIGN,
 };
 
 /**
@@ -228,11 +230,36 @@ export default function App() {
       ed.markPrepared(rev);
       return;
     }
+    // Only the clips whose compiled inputs moved. Everything else keeps the plan
+    // and the surfaces it already has, so retyping a caption costs one clip
+    // rather than the whole project -- and main re-encodes one image rather than
+    // base64ing every asset in the document on every debounce tick.
+    const previous = sessionRef.current;
+    const { stale, removed } = staleClips(doc, previous?.keys);
+
+    // Nothing to re-trace, nothing to drop, and nothing baked into the session
+    // has moved: the edit was structural only in the sense that some field
+    // outside TIMING_FIELDS changed. Keep the session whole, which is what makes
+    // a page rename or a subtitle reword free -- `draw()` already renders the
+    // live document, not the one the session was built from.
+    if (previous && !stale.length && !removed.length
+        && sessionKey(doc) === previous.sessionKey) {
+      ed.markPrepared(rev);
+      return;
+    }
+
     setStatus({ title: 'Preparing artwork', detail: 'Tracing images and laying out glyphs…' });
     try {
-      const loaded = await window.studio.prepareProject(doc, path);
+      const loaded = await window.studio.prepareProject(doc, path, {
+        only: previous ? stale : null,
+        subtitleFont: previous?.subtitleFontId ?? null,
+      });
       if (loaded?.error) { setError(loaded.error); return; }
-      const built = await buildSession(loaded);
+      // A newer edit landed while main was working. Its rebuild will supersede
+      // this one, and adopting a stale session here would hand it surfaces this
+      // payload is about to dispose.
+      if (sessionRef.current !== previous) return;
+      const built = await buildSession(loaded, previous);
       sessionRef.current = built;
       setBboxes(built.bboxes);
       setError(null);
@@ -314,7 +341,9 @@ export default function App() {
       const loaded = await window.studio.openProject(path);
       if (!loaded) return;
       if (loaded.error) { setError(loaded.error); return; }
-      const built = await buildSession(loaded);
+      // The outgoing session is handed over so its canvases are given back
+      // here; opening a second project otherwise holds both until a GC runs.
+      const built = await buildSession(loaded, sessionRef.current);
       sessionRef.current = built;
       setBboxes(built.bboxes);
       // `prepared` flag: the session we just built IS this document, so the
@@ -422,6 +451,7 @@ export default function App() {
       penWidth: draft.penWidth,
       color: draft.color,
       bold: draft.bold,
+      align: draft.align,
     }, { duration: textDuration(text), ...placement() });
     setDraft((d) => ({ ...d, text: '' }));
   }, [draft, ed, placement]);

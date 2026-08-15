@@ -118,16 +118,21 @@ export function advanceErase(sf, ep, u) {
     ctx.strokeStyle = '#000000';
   };
 
-  sf.erase.commitRange(ep.phase.i0, at.strokeIndex, (ctx, i) => {
+  // The layer is allocated on first use rather than with the clip: a project's
+  // clips overwhelmingly have no erase sweep, and the pair of canvases is the
+  // same size as the artwork.
+  const layer = sf.ensureErase();
+
+  layer.commitRange(ep.phase.i0, at.strokeIndex, (ctx, i) => {
     brush(ctx, ep.strokes[i]);
     strokeWhole(ctx, ep.strokes[i]);
   });
 
-  sf.erase.clearActive();
+  layer.clearActive();
   const st = ep.strokes[at.strokeIndex];
-  brush(sf.erase.active.ctx, st);
-  strokePartial(sf.erase.active.ctx, st, at.vertex, at.frac);
-  sf.erase.markUsed();
+  brush(layer.active.ctx, st);
+  strokePartial(layer.active.ctx, st, at.vertex, at.frac);
+  layer.markUsed();
 
   return {
     x: at.x,

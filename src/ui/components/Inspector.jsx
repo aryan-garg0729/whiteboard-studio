@@ -1,17 +1,23 @@
 import React from 'react';
-import { ANIMATIONS_FOR_KIND, pageAt, pageWindows } from '../../engine/model/project.js';
+import {
+  ANIMATIONS_FOR_KIND, TEXT_ALIGNS, pageAt, pageWindows,
+} from '../../engine/model/project.js';
 import { MIN_AUDIO } from '../../engine/model/edits.js';
 import { cameraAt } from '../../engine/render/renderFrame.js';
 import { aroundCentre, transformCorners } from '../stageGeom.js';
 import { Field, Group, Icon, Num, PATH, Soon } from './common.jsx';
 import FontPicker from './FontPicker.jsx';
 import { getAnimation } from '../../engine/anim/registry.js';
+import { DEFAULT_TEXT_ALIGN } from '../../engine/compile/text.js';
 
 /**
  * Breathing room left around a clip by "Zoom to selection", as a multiple of
  * its bounding box. Framing artwork edge to edge looks like a crop, not a shot.
  */
 const FRAME_MARGIN = 1.24;
+
+/** Glyphs rather than words: three of them have to fit on one row. */
+const ALIGN_LABEL = { left: '\u2630', center: '\u2632', right: '\u2634' };
 
 const ANIMATION_LABELS = {
   'draw.inkPaint': 'Ink outline, then colour',
@@ -264,6 +270,24 @@ function ClipInspector({ ed, clip, asset, fonts, frame, fps, selection, bboxes }
               </label>
             </Field>
           </div>
+          {/* Only ever visible on a caption of more than one line, so it is
+              labelled for what it does rather than shown conditionally --
+              hiding it would make it unfindable at the moment you add the
+              second line. */}
+          <Field label="Lines">
+            <div className="seg">
+              {TEXT_ALIGNS.map((a) => (
+                <button
+                  key={a}
+                  aria-pressed={(asset.align ?? DEFAULT_TEXT_ALIGN) === a}
+                  title={`Align ${a}`}
+                  onClick={() => ed.patchAsset(asset.id, { align: a })}
+                >
+                  {ALIGN_LABEL[a]}
+                </button>
+              ))}
+            </div>
+          </Field>
           {/* Keyed on the asset so switching clips closes an open list rather
               than leaving the previous clip's picker hanging open. */}
           <Field label="Face" stack>

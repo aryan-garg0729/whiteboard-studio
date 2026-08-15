@@ -237,12 +237,15 @@ server.registerTool('add_clip', {
     penWidth: z.number().optional(),
     color: z.string().optional(),
     bold: z.boolean().optional().describe('for kind=text'),
+    align: z.enum(['left', 'center', 'right']).optional()
+      .describe('for kind=text; how lines sit against each other. Default center.'),
     animId: z.string().optional(),
     duration: z.number().min(0.01).optional(),
     transform: transformSchema.optional(),
     params: z.record(z.string(), z.any()).optional(),
   },
-}, tool(async ({ name, kind, text, src, font, fontSize, penWidth, color, bold, ...rest }) => {
+}, tool(async ({ name, kind, text, src, font, fontSize, penWidth, color, bold, align,
+  ...rest }) => {
   if (kind === 'text' && !text) throw new edits.EditError('kind=text needs `text`');
   if (kind !== 'text' && !src) throw new edits.EditError(`kind=${kind} needs \`src\``);
 
@@ -252,7 +255,8 @@ server.registerTool('add_clip', {
         ...(fontSize !== undefined ? { fontSize } : {}),
         ...(penWidth !== undefined ? { penWidth } : {}),
         ...(color ? { color } : {}),
-        ...(bold !== undefined ? { bold } : {}) }
+        ...(bold !== undefined ? { bold } : {}),
+        ...(align ? { align } : {}) }
     : { kind, src: readablePath(src) };
 
   const duration = rest.duration
@@ -300,6 +304,7 @@ server.registerTool('update_asset', {
     penWidth: z.number().optional(),
     color: z.string().optional(),
     bold: z.boolean().optional(),
+    align: z.enum(['left', 'center', 'right']).optional(),
     src: z.string().optional(),
   },
 }, tool(async ({ name, assetId, ...patch }) => {
@@ -570,6 +575,8 @@ server.registerTool('storyboard', {
       fontSize: z.number().optional(),
       color: z.string().optional(),
       bold: z.boolean().optional().describe('set the caption in bold'),
+      align: z.enum(['left', 'center', 'right']).optional()
+        .describe('how the caption\'s lines sit against each other. Default center.'),
       page: z.boolean().optional().describe('start this beat on a fresh sheet'),
       transition: z.enum([...TRANSITIONS]).optional(),
       erase: z.object({

@@ -85,6 +85,22 @@ test('assets must declare a known kind and its required field', () => {
   throwsAt({ assets: { a: { kind: 'text' } }, clips: [] }, 'assets.a.text');
 });
 
+test('a text asset may name an alignment, and only a real one', () => {
+  const withAlign = (align) => ({
+    ...minimal(), assets: { a: { kind: 'text', text: 'hi', align } },
+  });
+  for (const align of ['left', 'center', 'right']) {
+    assert.equal(normalizeProject(withAlign(align)).assets.a.align, align);
+  }
+  throwsAt(withAlign('justify'), 'assets.a.align');
+  throwsAt(withAlign(true), 'assets.a.align');
+
+  // Absent stays absent. The layout supplies the default, so writing one in
+  // here would rewrite every saved project the first time it was opened.
+  const bare = normalizeProject({ ...minimal(), assets: { a: { kind: 'text', text: 'hi' } } });
+  assert.equal('align' in bare.assets.a, false);
+});
+
 test('an erase that starts before the draw finishes is rejected', () => {
   const raw = minimal();
   raw.clips[0] = { assetId: 'a', animId: 'draw.outlineFill', start: 1, duration: 3,

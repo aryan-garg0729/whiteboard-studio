@@ -17,8 +17,10 @@ paper, one sheet at a time, and a camera can move over the sheet.
 - **meta** — fps, width, height, background, handStyleId, showHand.
 - **assets** — the material: an \`image\` (a file, drawn from its pixels), a
   \`vector\` (an SVG, used exactly as drawn), or \`text\` (a string plus a font).
-  Text, font, fontSize, penWidth, colour and \`bold\` live on the *asset*, not the
-  clip; use \`update_asset\` to reword a caption or set it in bold.
+  Text, font, fontSize, penWidth, colour, \`bold\` and \`align\` live on the
+  *asset*, not the clip; use \`update_asset\` to reword a caption, set it in bold
+  or change how its lines sit. \`align\` is left/center/right and defaults to
+  center, which only shows on a caption of more than one line.
 - **pages** — the sheets of paper, each with its own camera keyframes.
 - **pageBreaks** — the *itinerary* over those sheets: when the composition
   leaves one for another. A sheet may be revisited, which is what makes "go back
