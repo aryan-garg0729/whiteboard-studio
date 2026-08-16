@@ -20,8 +20,5 @@
   },
   "enabledMcpjsonServers": [
     "whiteboard-studio"
-  ],
-  "disabledMcpjsonServers": [
-    "videotool"
   ]
 }
