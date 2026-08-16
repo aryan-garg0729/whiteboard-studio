@@ -383,7 +383,7 @@ server.registerTool('set_meta', {
   const clean = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined));
   // A different hand needs its sprites loaded, and a resize changes every
   // surface; both mean the cached session is no longer the right one.
-  studio.commit(name, (d) => edits.patchMeta(d, clean), { structural: true });
+  studio.commit(name, (d) => edits.patchMeta(d, clean));
   return after(name, { meta: studio.doc(name).meta });
 }));
 
@@ -588,7 +588,7 @@ server.registerTool('storyboard', {
 }, tool(async ({ name, beats }) => {
   const ctx = { root: ROOT, rel: readablePath };
   const { doc } = await storyboard({ doc: studio.doc(name), beats, ctx });
-  studio.commit(name, () => doc, { structural: true });
+  studio.commit(name, () => doc);
   return after(name, { beats: beats.length });
 }));
 

@@ -242,25 +242,66 @@ test('an edit the validator rejects leaves the document exactly as it was', () =
   } finally { cleanup(name); }
 });
 
-test('a structural edit drops the cached session and a timing edit keeps it', async () => {
+test('an edit recompiles the geometry it changed and nothing else', async () => {
+  const name = scratch();
+  try {
+    const studio = new Studio();
+    studio.create(name);
+    await studio.addClip(name, { kind: 'text', text: 'hello' }, { duration: 3 });
+    await studio.addClip(name, { kind: 'text', text: 'world' }, { duration: 3 });
+
+    const built = await studio.built(name);
+    const [a, b] = built.project.clips.map((c) => c.id);
+    const planOf = (s, id) => s.session.plans.get(id);
+
+    // A retime changes no geometry, so every plan must be the very object it
+    // was -- not an equal copy, which would mean the work was done again.
+    studio.updateClip(name, a, { start: 1 });
+    const retimed = await studio.built(name);
+    assert.equal(planOf(retimed, a), planOf(built, a), 'a retime recompiled a clip');
+    assert.equal(planOf(retimed, b), planOf(built, b));
+
+    // An animation change must recompile that clip, and only that clip.
+    studio.updateClip(name, a, { animId: 'appear.fade' });
+    const changed = await studio.built(name);
+    assert.notEqual(planOf(changed, a), planOf(built, a),
+      'an animation change reused a stale plan');
+    assert.equal(planOf(changed, b), planOf(built, b),
+      'an edit to one clip recompiled another');
+
+    // Rewording an asset is the same story, through a different door.
+    const assetId = changed.project.clips.find((c) => c.id === b).assetId;
+    studio.updateAsset(name, assetId, { text: 'planet' });
+    const reworded = await studio.built(name);
+    assert.notEqual(planOf(reworded, b), planOf(changed, b), 'a reword reused a stale plan');
+    assert.equal(planOf(reworded, a), planOf(changed, a));
+  } finally { cleanup(name); }
+});
+
+test('an in-flight session is never mutated by a later edit', async () => {
+  // export_video captures the session in a closure and encodes from it for
+  // minutes. If an edit reached into that session, the video would change
+  // halfway through -- and a disposed surface would blank the rest of it.
   const name = scratch();
   try {
     const studio = new Studio();
     studio.create(name);
     await studio.addClip(name, { kind: 'text', text: 'hello' }, { duration: 3 });
 
-    const built = await studio.built(name);
-    const clipId = built.project.clips[0].id;
-
-    // Asserted on the session rather than the wrapper: a retime refreshes the
-    // wrapper so the render sees the new document, but must not touch the
-    // compiled geometry inside it.
-    studio.updateClip(name, clipId, { start: 1 });
-    assert.equal((await studio.built(name)).session, built.session, 'a retime rebuilt the session');
+    const exporting = await studio.built(name);
+    const clipId = exporting.project.clips[0].id;
+    const planBefore = exporting.session.plans.get(clipId);
+    const surfaceBefore = exporting.session.surfaces.get(clipId);
 
     studio.updateClip(name, clipId, { animId: 'appear.fade' });
-    assert.notEqual((await studio.built(name)).session, built.session,
-      'an animation change reused a stale session');
+    const next = await studio.built(name);
+
+    assert.notEqual(next.session, exporting.session, 'the edit reused the session object');
+    assert.equal(exporting.session.plans.get(clipId), planBefore,
+      'the running export lost the plan it was encoding');
+    assert.equal(exporting.session.surfaces.get(clipId), surfaceBefore);
+    assert.ok(surfaceBefore.cw > 0 && surfaceBefore.ch > 0,
+      'the running export had its surfaces disposed underneath it');
   } finally { cleanup(name); }
 });
 
@@ -302,9 +343,13 @@ test('refreshing for a non-structural edit keeps the compiled plans', async () =
     studio.updateClip(name, before.project.clips[0].id, { start: 2 });
     const after = await studio.built(name);
 
-    // The point of the structural split: a retime must not re-compile geometry.
-    assert.equal(after.session.plans.get(after.project.clips[0].id), plan, 'geometry was recompiled');
-    assert.equal(after.session, before.session, 'the session was rebuilt');
+    // The whole point: a retime must not re-compile geometry. Asserted on the
+    // plan and the surfaces rather than on the session object, which is
+    // deliberately new each time so a running export cannot be edited underneath.
+    const clipId = after.project.clips[0].id;
+    assert.equal(after.session.plans.get(clipId), plan, 'geometry was recompiled');
+    assert.equal(after.session.surfaces.get(clipId), before.session.surfaces.get(clipId),
+      'the surfaces, and the artwork painted into them, were thrown away');
   } finally { cleanup(name); }
 });
 

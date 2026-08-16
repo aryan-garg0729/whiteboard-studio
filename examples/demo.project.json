@@ -1,33 +1,51 @@
 {
   "meta": {
     "version": 1,
-    "name": "",
-    "fps": 60,
+    "name": "demo.project",
+    "fps": 30,
     "width": 1920,
     "height": 1080,
-    "background": "#fefed7",
+    "background": "#fdfdfb",
     "handStyleId": "hand3",
     "showHand": true
   },
   "assets": {
     "text1": {
       "kind": "text",
-      "text": "abcdefghijklmnopqrstuvwxyz\n\nABCDEFGHIJKLMNOPQRSTUVWXYZ\n0123456789\n!@#$%^7*()[]",
-      "font": "/home/aryan/Personal/yt/v3/assets/fonts/PlayfairDisplay.ttf",
+      "text": "Welcome to Whiteboard Studio",
+      "font": "D:\\youtube\\whiteboard_studio\\assets\\fonts\\Caveat.ttf",
       "fontSize": 120,
       "penWidth": 5,
       "color": "#1a1a1a",
+      "bold": true,
+      "align": "center",
       "id": "text1"
     },
     "art1": {
       "kind": "image",
-      "src": "/home/aryan/Personal/yt/v1/character/manish pabrai.png",
+      "src": "D:\\youtube\\whiteboard_studio\\whiteboard_assets\\BlackDiversityWomanSitHappyRelaxedCoffeeSmileChair_out.png",
       "id": "art1"
     },
     "art2": {
       "kind": "image",
-      "src": "/home/aryan/Personal/yt/v1/character/manish pabrai.png",
+      "src": "D:\\youtube\\whiteboard_studio\\whiteboard_assets\\BlackHandsHoldPaperBlankDocument_out.png",
       "id": "art2"
+    },
+    "art3": {
+      "kind": "image",
+      "src": "D:\\youtube\\whiteboard_studio\\whiteboard_assets\\BlackHandHoldingCashPaymentMoneyFinanceFundsSpendExpensiveCostBribeOfferFee_out.png",
+      "id": "art3"
+    },
+    "text2": {
+      "kind": "text",
+      "text": "Bring Your \nImagination \nto Reality",
+      "font": "D:\\youtube\\whiteboard_studio\\assets\\fonts\\PatrickHand-Regular.ttf",
+      "fontSize": 120,
+      "penWidth": 5,
+      "color": "#ff0000",
+      "bold": true,
+      "align": "center",
+      "id": "text2"
     }
   },
   "pages": [
@@ -42,52 +60,28 @@
           "zoom": 1
         },
         {
-          "t": 18.883,
+          "t": 12,
           "x": 0,
           "y": 0,
           "zoom": 1
         },
         {
-          "t": 19.883,
-          "x": -629,
-          "y": -302,
-          "zoom": 7.443
+          "t": 12.567,
+          "x": 55,
+          "y": 75,
+          "zoom": 2.314
         },
         {
-          "t": 21.7,
-          "x": 340,
-          "y": -307,
-          "zoom": 7.443
+          "t": 22.7,
+          "x": 55,
+          "y": 75,
+          "zoom": 2.314
         },
         {
-          "t": 22.5,
-          "x": -618,
-          "y": -59,
-          "zoom": 7.443
-        },
-        {
-          "t": 24.383333333333333,
-          "x": 661,
-          "y": -67,
-          "zoom": 7.443
-        },
-        {
-          "t": 24.967,
-          "x": -14,
-          "y": -73,
-          "zoom": 1.075
-        },
-        {
-          "t": 32.583,
-          "x": -14,
-          "y": -73,
-          "zoom": 1.075
-        },
-        {
-          "t": 33.583,
-          "x": 226,
-          "y": 95,
-          "zoom": 3.789
+          "t": 23.7,
+          "x": -50,
+          "y": -41,
+          "zoom": 1.052
         }
       ]
     }
@@ -113,11 +107,13 @@
       "pageId": "page1",
       "trackId": "v1",
       "start": 0,
-      "duration": 19.3,
+      "duration": 4,
       "transform": {
-        "x": -759,
-        "y": -274,
-        "scale": 0.74,
+        "x": -614,
+        "y": -390,
+        "scale": 1,
+        "scaleX": 1,
+        "scaleY": 1,
         "rotation": 0
       },
       "params": {}
@@ -125,15 +121,17 @@
     {
       "id": "clip2",
       "assetId": "art1",
-      "animId": "draw.imageReveal",
+      "animId": "draw.inkPaint",
       "pageId": "page1",
       "trackId": "v1",
-      "start": 24.967,
+      "start": 4,
       "duration": 4,
       "transform": {
-        "x": -153,
-        "y": -76,
+        "x": -932,
+        "y": -141,
         "scale": 1,
+        "scaleX": 1,
+        "scaleY": 1,
         "rotation": 0
       },
       "params": {}
@@ -141,16 +139,58 @@
     {
       "id": "clip3",
       "assetId": "art2",
-      "animId": "draw.imageReveal",
+      "animId": "draw.stencilPaint",
       "pageId": "page1",
       "trackId": "v1",
-      "start": 29,
+      "start": 8,
       "duration": 4,
       "transform": {
-        "x": 99,
-        "y": -63,
+        "x": -328,
+        "y": -346,
         "scale": 1,
+        "scaleX": 1,
+        "scaleY": 1,
         "rotation": 0
+      },
+      "params": {}
+    },
+    {
+      "id": "clip4",
+      "assetId": "art3",
+      "animId": "draw.inkPaint",
+      "pageId": "page1",
+      "trackId": "v1",
+      "start": 12.567,
+      "duration": 4,
+      "transform": {
+        "x": -132,
+        "y": -112,
+        "scale": 0.438,
+        "scaleX": 1,
+        "scaleY": 1,
+        "rotation": 0
+      },
+      "params": {},
+      "erase": {
+        "start": 16.9,
+        "duration": 1.6
+      }
+    },
+    {
+      "id": "clip5",
+      "assetId": "text2",
+      "animId": "draw.handwrite",
+      "pageId": "page1",
+      "trackId": "v1",
+      "start": 18.5,
+      "duration": 4.64,
+      "transform": {
+        "x": -84,
+        "y": 2,
+        "scale": 0.437,
+        "scaleX": 1,
+        "scaleY": 1,
+        "rotation": -11.996
       },
       "params": {}
     }

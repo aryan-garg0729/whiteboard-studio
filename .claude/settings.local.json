@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__whiteboard-studio__list_capabilities",
+      "mcp__whiteboard-studio__create_project",
+      "mcp__whiteboard-studio__write_svg",
+      "mcp__whiteboard-studio__storyboard",
+      "mcp__whiteboard-studio__add_clip",
+      "mcp__whiteboard-studio__add_page",
+      "mcp__whiteboard-studio__import_asset",
+      "mcp__whiteboard-studio__render_contact_sheet",
+      "mcp__whiteboard-studio__get_project",
+      "mcp__whiteboard-studio__update_clip",
+      "mcp__whiteboard-studio__set_camera",
+      "mcp__whiteboard-studio__update_asset",
+      "mcp__whiteboard-studio__render_frame",
+      "mcp__whiteboard-studio__export_video",
+      "mcp__whiteboard-studio__export_status"
+    ]
+  },
+  "enabledMcpjsonServers": [
+    "whiteboard-studio"
+  ],
+  "disabledMcpjsonServers": [
+    "videotool"
+  ]
+}

@@ -37,8 +37,6 @@ if (process.env.WB_SMOKE) app.commandLine.appendSwitch('force-device-scale-facto
 /** Shipped sample projects. Read by both the File menu and `project:examples`. */
 const EXAMPLES = [
   join(ROOT, 'examples', 'demo.project.json'),
-  join(ROOT, 'examples', 'svg.project.json'),
-  join(ROOT, 'examples', 'pages.project.json'),
 ];
 
 /**

@@ -18,8 +18,10 @@ import { readFileSync } from 'node:fs';
 
 import { prepareProject } from '../electron/prepare.js';
 import { normalizeProject } from '../src/engine/model/project.js';
-import { buildSession, clipKey, sessionKey, staleClips } from '../src/ui/engineHost.js';
+import { buildSession } from '../src/ui/engineHost.js';
+import { clipKey, sessionKey, staleClips } from '../src/engine/model/fingerprint.js';
 import { renderFrame } from '../src/engine/render/renderFrame.js';
+import { buildNodeSession, updateNodeSession } from '../src/engine/host/nodeSession.js';
 import { useTestSurfaces } from './helpers/surface.js';
 import { newSurface } from '../src/engine/render/surfaces.js';
 
@@ -235,5 +237,91 @@ test('an incrementally rebuilt session renders exactly like a full one', async (
   for (const frame of [0, 20, 60, 149]) {
     assert.deepEqual(pixels(incremental, frame), pixels(full, frame),
       `frame ${frame} must be identical however the session was assembled`);
+  }
+});
+
+// ── the same guarantee, on the node host ──────────────────────────────
+
+/**
+ * The MCP server re-derives a session after every mutating tool call, so this is
+ * the path an agent's edits take. It has its own reconciler because it reads and
+ * compiles files itself rather than rebuilding from an IPC payload -- but it
+ * shares `clipKey`, and it has to reach the same pixels.
+ */
+const nodeProject = (overrides = {}) => normalizeProject({
+  ...JSON.parse(readFileSync(PATH, 'utf8')),
+  clips: [
+    { id: 'a', assetId: 'logo', animId: 'draw.stencilPaint', start: 0, duration: 5,
+      transform: { x: -300, y: -225, scale: 1.5, rotation: 0 } },
+    { id: 'b', assetId: 'logo', animId: 'draw.stencilPaint', start: 0, duration: 5,
+      transform: { x: 300, y: 200, scale: 1, rotation: 0 } },
+  ],
+  ...overrides,
+});
+
+// The example names its artwork relative to its own directory, which is what
+// `rel` exists to resolve; the MCP server passes a workspace-sandboxed one.
+const NODE_CTX = {
+  root: ROOT,
+  rel: (p) => (p.startsWith('/') ? p : `${ROOT}examples/${p}`),
+};
+
+test('the node host reuses plans and surfaces across an edit', async () => {
+  const first = await buildNodeSession(nodeProject(), NODE_CTX);
+  const edited = nodeProject({
+    clips: first.project.clips.map((c) => (c.id === 'b' ? { ...c, animId: 'draw.inkPaint' } : c)),
+  });
+  const next = await updateNodeSession(first, edited, NODE_CTX);
+
+  assert.equal(next.session.plans.get('a'), first.session.plans.get('a'),
+    'the untouched clip was recompiled');
+  assert.equal(next.session.surfaces.get('a'), first.session.surfaces.get('a'),
+    'its surfaces, and the artwork painted into them, were thrown away');
+  assert.notEqual(next.session.plans.get('b'), first.session.plans.get('b'),
+    'the edited clip was not recompiled');
+});
+
+test('changing the drawing hand recompiles nothing', async () => {
+  // The sprites are session state and must be reloaded, but a hand cannot
+  // affect a single stroke. Rebuilding the project for it cost 25s on a
+  // 108-clip document; this is the check that it no longer does.
+  const first = await buildNodeSession(nodeProject(), NODE_CTX);
+  const swapped = nodeProject({
+    meta: { ...first.project.meta, handStyleId: 'hand1' },
+  });
+  const next = await updateNodeSession(first, swapped, NODE_CTX);
+
+  assert.equal(next.handStyleId, 'hand1', 'the new hand was not loaded');
+  assert.notEqual(next.session.resolveImage, first.session.resolveImage,
+    'the sprites were not reloaded');
+  for (const id of ['a', 'b']) {
+    assert.equal(next.session.plans.get(id), first.session.plans.get(id),
+      `${id} was recompiled for a hand change`);
+  }
+});
+
+test('a node session rebuilt incrementally renders exactly like a full one', async () => {
+  const edited = nodeProject({
+    clips: nodeProject().clips.map((c) => (c.id === 'b'
+      ? { ...c, animId: 'draw.inkPaint', transform: { ...c.transform, scale: 2 } }
+      : c)),
+  });
+
+  const incremental = await updateNodeSession(
+    await buildNodeSession(nodeProject(), NODE_CTX), edited, NODE_CTX);
+  const full = await buildNodeSession(edited, NODE_CTX);
+
+  const pixels = (built, frame) => {
+    const { width, height } = built.project.meta;
+    const c = newSurface(width, height);
+    renderFrame(built.session, built.project, frame, c.ctx, {
+      width, height, showHand: false, handStyleId: built.handStyleId,
+    });
+    return Buffer.from(c.ctx.getImageData(0, 0, width, height).data);
+  };
+
+  for (const frame of [0, 30, 90, 149]) {
+    assert.deepEqual(pixels(incremental, frame), pixels(full, frame),
+      `frame ${frame} must not depend on how the session was assembled`);
   }
 });

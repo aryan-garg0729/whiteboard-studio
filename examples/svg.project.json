@@ -1,9 +1,0 @@
-{
-  "meta": { "fps": 30, "width": 1920, "height": 1080, "handStyleId": "hand2" },
-  "assets": { "logo": { "kind": "vector", "src": "shapes.svg" } },
-  "clips": [{
-    "id": "s", "assetId": "logo", "animId": "draw.outlineFill",
-    "start": 0, "duration": 5,
-    "transform": { "x": -300, "y": -225, "scale": 1.5, "rotation": 0 }
-  }]
-}

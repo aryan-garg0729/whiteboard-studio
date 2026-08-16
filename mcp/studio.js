@@ -12,9 +12,10 @@
  * than anything this layer could synthesise.
  *
  * **Rebuilds are avoided, not tolerated.** A compiled session is cached and
- * invalidated only by a structural edit, exactly the split `isStructural`
- * already encodes for the UI. Retiming a clip or moving it is free; changing
- * its text is not.
+ * reconciled clip by clip: `built()` diffs the document against the session it
+ * is holding and recompiles only the clips whose `clipKey` moved. Retiming a
+ * clip, moving it, or nudging the camera is free; rewording one caption costs
+ * that caption. Nothing has to declare what it changed.
  *
  * **A new clip is placed, not dropped at the origin.** A drawable's origin is
  * its bounding-box corner and its natural size is often bigger than the frame,
@@ -24,11 +25,12 @@
  * before the edit is ever committed.
  */
 
-import { cameraAt, ensureSurfaces } from '../src/engine/render/renderFrame.js';
+import { cameraAt } from '../src/engine/render/renderFrame.js';
 import { normalizeProject, projectDuration, projectFrames } from '../src/engine/model/project.js';
-import { buildNodeSession, compileClip, installNodeSurfaces } from '../src/engine/host/nodeSession.js';
+import {
+  compileClip, installNodeSurfaces, updateNodeSession,
+} from '../src/engine/host/nodeSession.js';
 import * as edits from '../src/engine/model/edits.js';
-import { penScale } from '../src/engine/model/transform.js';
 import { checkAnimForKind, checkParams, checkTransform } from './capabilities.js';
 import { ROOT, loadProject, readablePath, saveProject } from './workspace.js';
 
@@ -73,18 +75,23 @@ export class Studio {
   /**
    * Apply a transform, validate, persist.
    *
-   * `structural` marks edits that change compiled geometry. Anything else keeps
-   * the compiled plans, which is what keeps a retime instant -- but it still
-   * bumps `rev`, because the cached session is holding the *old* document and
-   * would otherwise go on rendering it. See `built()`.
+   * Callers used to have to declare whether an edit was "structural", and the
+   * cached session was thrown away whenever one said yes. They no longer do:
+   * `built()` diffs the document against the session it is holding and
+   * recompiles exactly the clips whose geometry moved. That is strictly more
+   * accurate than the flag was -- it catches an asset edited underneath a clip,
+   * and it does *not* fire for a rescale that leaves the pen width alone -- and
+   * it removes the failure mode where a caller mis-classified an edit and the
+   * server quietly rendered stale artwork.
+   *
+   * Bumping `rev` is what tells `built()` there is something to reconcile.
    */
-  commit(name, fn, { structural = false } = {}) {
+  commit(name, fn) {
     const e = this.entry(name);
     const next = normalizeProject(fn(e.doc));
     e.history = [...e.history, e.doc].slice(-HISTORY_LIMIT);
     e.doc = next;
     e.rev++;
-    if (structural) e.built = null;
     saveProject(name, next);
     return next;
   }
@@ -95,10 +102,9 @@ export class Studio {
     e.doc = e.history[e.history.length - 1];
     e.history = e.history.slice(0, -1);
     e.rev++;
-    // No record of whether the undone edit was structural, and a stale session
-    // renders the wrong artwork. Rebuilding is cheap -- compiling is
-    // content hash -- and always correct.
-    e.built = null;
+    // No need to know what the undone edit was: the same diff that handles a
+    // forward edit handles going back, and an undo that changed no geometry --
+    // a retime, a camera move -- now costs nothing to reverse.
     saveProject(name, e.doc);
     return e.doc;
   }
@@ -108,55 +114,26 @@ export class Studio {
   /**
    * The compiled session for the *current* document.
    *
-   * There are three cases, and conflating the last two is a bug worth naming:
-   * nothing built yet, built but the geometry is stale, and built with good
-   * geometry but an out-of-date document.
-   *
    * `renderFrame(session, project, ...)` takes the document as a separate
    * argument, so a session cached alongside an older document keeps rendering
    * that older document -- silently and correctly, which is what makes it hard
-   * to spot. Every non-structural edit hits this: a camera move, a retime, a
-   * page break, a clip nudged across the page. They are saved to disk and then
-   * simply do not appear, until some later structural edit happens to force a
-   * rebuild. An export can encode the stale version too.
+   * to spot. Every edit therefore has to come through here before anything is
+   * rendered or exported, or a camera move is saved to disk and then simply does
+   * not appear.
    *
-   * The fix is not to rebuild on every edit -- that would re-trace artwork for
-   * a change that cannot affect it, which is exactly what the structural split
-   * exists to avoid. It is to swap the document in and keep the plans. The
-   * surfaces stay valid because `surfacesFor` keys only off `plan.bbox`, and
-   * the artwork already painted into them is untouched.
+   * `updateNodeSession` does the reconciling: it keeps the plans and surfaces of
+   * every clip whose compiled inputs are unchanged and recompiles only the rest.
+   * That is what makes authoring linear instead of quadratic -- adding the N-th
+   * clip used to recompile all N, at 13.4s per edit on a 56-clip document.
    */
   async built(name) {
     const e = this.entry(name);
+    if (e.built && e.built.rev === e.rev) return e.built;
 
-    if (e.built && e.built.rev !== e.rev) {
-      // A clip that appeared or vanished means a plan is missing or orphaned,
-      // and no amount of swapping fixes that. Structural edits already null the
-      // cache, so this is a guard against a future caller mis-classifying one
-      // rather than a case that arises today -- but it is the check that makes
-      // the fast path provably safe.
-      const ids = new Set(e.doc.clips.map((c) => c.id));
-      const sameClips = ids.size === e.built.session.plans.size
-        && [...ids].every((id) => e.built.session.plans.has(id));
-      if (sameClips) {
-        ensureSurfaces(e.built.session, e.doc);
-        e.built = {
-          ...e.built,
-          project: e.doc,
-          frames: projectFrames(e.doc),
-          rev: e.rev,
-        };
-      } else {
-        e.built = null;
-      }
-    }
-
-    if (!e.built) {
-      e.built = {
-        ...await buildNodeSession(e.doc, { root: this.root, rel: readablePath }),
-        rev: e.rev,
-      };
-    }
+    e.built = {
+      ...await updateNodeSession(e.built, e.doc, { root: this.root, rel: readablePath }),
+      rev: e.rev,
+    };
     return e.built;
   }
 
@@ -200,7 +177,7 @@ export class Studio {
       next = edits.patchTransform(next, clip.id, { ...placed, ...checked });
     }
 
-    this.commit(name, () => next, { structural: true });
+    this.commit(name, () => next);
     return { clipId: clip.id, assetId: clip.assetId, notes: paramCheck.notes };
   }
 
@@ -237,17 +214,10 @@ export class Studio {
     // `erase: null` removes the sweep; leaving it out means "do not touch".
     if (patch.erase !== undefined) out.erase = patch.erase ?? undefined;
 
-    // The transform feeds the brush width (which is authored in screen terms
-    // and divides out the scale), so a rescale does change compiled geometry.
-    // Only a rescale, though -- a move must stay timing-class, or dragging a
-    // clip would re-trace its artwork on every step. Compared through
-    // `penScale` so a squeeze counts and a pure mirror, which changes no
-    // stroke's width, does not.
-    const rescaled = out.transform !== undefined
-      && penScale(out.transform) !== penScale(clip.transform);
-    const structural = out.animId !== undefined || out.params !== undefined || rescaled;
-
-    this.commit(name, (d) => edits.patchClip(d, id, out), { structural });
+    // Nothing here declares whether the edit re-traces anything: `clipKey`
+    // reads the same fields (`animId`, `params`, and the scale through
+    // `penScale`) off the committed document and decides for itself.
+    this.commit(name, (d) => edits.patchClip(d, id, out));
     return notes;
   }
 
@@ -256,10 +226,10 @@ export class Studio {
     if (!doc.clips.some((c) => c.id === id)) {
       throw new edits.EditError(`no such clip ${JSON.stringify(id)}`);
     }
-    this.commit(name, (d) => edits.removeClipFrom(d, id), { structural: true });
+    this.commit(name, (d) => edits.removeClipFrom(d, id));
   }
 
-  /** Reword a caption, change its face, size or colour. Always structural. */
+  /** Reword a caption, change its face, size, colour or alignment. */
   updateAsset(name, id, patch) {
     const allowed = ['text', 'font', 'fontSize', 'penWidth', 'color', 'bold', 'align', 'src'];
     for (const k of Object.keys(patch)) {
@@ -271,7 +241,7 @@ export class Studio {
     const next = { ...patch };
     if (next.font) next.font = readablePath(next.font);
     if (next.src) next.src = readablePath(next.src);
-    this.commit(name, (d) => edits.patchAsset(d, id, next), { structural: true });
+    this.commit(name, (d) => edits.patchAsset(d, id, next));
   }
 
   // ── the view an agent reasons about ─────────────────────────────────
